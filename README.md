@@ -75,12 +75,25 @@ Review local digest quality (no AI):
 python scripts/review_local_digest.py --course ECA1010_Microeconomics --source-id SRC-0001
 ```
 
+Check pipeline status and next recommended step:
+
+```bash
+python scripts/pipeline_status.py --course ECA1010_Microeconomics --source-id SRC-0001
+```
+
 Export intermediate audit packet for manual Gemini / AI Studio review:
 
 ```bash
 python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001
 python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --limit-chunks 1 --overwrite
 python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --only-needs-review --overwrite
+```
+
+Run automated intermediate audit (Google AI / Gemma 4; output is cleaned to remove scratchpad noise):
+
+```bash
+python scripts/run_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/run_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --keep-raw
 ```
 
 Import Gemini intermediate audit (versioned storage):
@@ -103,6 +116,13 @@ Import ChatGPT final audit (versioned storage):
 ```bash
 python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\final_audit.md"
 python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --text "Final audit content" --notes "First pass"
+```
+
+Generate study pack from the latest final audit (no AI; deterministic parser):
+
+```bash
+python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001 --overwrite
 ```
 
 ## Layout

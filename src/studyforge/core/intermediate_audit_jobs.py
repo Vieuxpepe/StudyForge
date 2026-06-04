@@ -4,15 +4,18 @@ Run intermediate audits via Google AI (Gemma 4 on Gemini API).
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from studyforge.audits.audit_sanitizer import sanitize_audit_output_with_stats
 from studyforge.audits.intermediate_import import import_intermediate_audit
 from studyforge.audits.intermediate_packet import (
     LocalDigestNotFoundError,
     build_intermediate_audit_instructions,
     collect_intermediate_audit_items,
+    get_intermediate_audit_dir,
 )
 from studyforge.core.extraction_jobs import find_source_by_id
 from studyforge.core.secrets import get_google_api_key
@@ -24,6 +27,12 @@ from studyforge.llm.google_genai_client import (
     GoogleGenAIConfigError,
     GoogleGenAIConnectionError,
     generate_content,
+)
+
+_RAW_DEBUG_DIR = "raw_debug"
+_CHUNK_AUDIT_HEADING = re.compile(
+    r"^#+\s*Audit\s*(?:[—\-]|$)",
+    re.IGNORECASE,
 )
 
 
@@ -46,9 +55,28 @@ def build_chunk_audit_user_message(
 
 ---
 
-Apply the audit instructions. Report findings for this chunk only.
-Use the chunk ID {chunk_id} in every issue entry.
+Apply the audit instructions for this chunk only.
+
+Replace <CHUNK_ID> with {chunk_id} in your output.
+Output ONLY the final structured report (no scratchpad text).
 """
+
+
+def _raw_debug_dir(course_path: Path, source_id: str) -> Path:
+    return get_intermediate_audit_dir(course_path, source_id) / _RAW_DEBUG_DIR
+
+
+def _format_chunk_block(chunk_id: str, section_text: str) -> list[str]:
+    """Format one chunk section, avoiding duplicate audit headings."""
+    text = section_text.strip()
+    if not text:
+        return [f"## Audit — {chunk_id}", "", "_(empty audit section)_", "", "---", ""]
+
+    first_line = text.splitlines()[0].strip()
+    if _CHUNK_AUDIT_HEADING.match(first_line):
+        return [text, "", "---", ""]
+
+    return [f"## Audit — {chunk_id}", "", text, "", "---", ""]
 
 
 def _assemble_audit_markdown(
@@ -59,6 +87,7 @@ def _assemble_audit_markdown(
     model: str,
     chunk_sections: list[tuple[str, str]],
     warnings: list[str],
+    sanitization: dict,
 ) -> str:
     generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     lines = [
@@ -79,6 +108,12 @@ def _assemble_audit_markdown(
         "Auditor:",
         "Google AI (automated)",
         "",
+        "Sanitization:",
+        f"raw words: {sanitization.get('raw_word_count', 0)}",
+        f"cleaned words: {sanitization.get('cleaned_word_count', 0)}",
+        f"removed words: {sanitization.get('sanitizer_removed_words', 0)}",
+        f"removed characters: {sanitization.get('sanitizer_removed_characters', 0)}",
+        "",
     ]
     if warnings:
         lines.append("Warnings:")
@@ -89,18 +124,9 @@ def _assemble_audit_markdown(
     lines.extend(["---", ""])
 
     for chunk_id, section_text in chunk_sections:
-        lines.extend(
-            [
-                f"## Audit — {chunk_id}",
-                "",
-                section_text,
-                "",
-                "---",
-                "",
-            ]
-        )
+        lines.extend(_format_chunk_block(chunk_id, section_text))
 
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def run_intermediate_audit_for_source(
@@ -115,12 +141,12 @@ def run_intermediate_audit_for_source(
     request_interval_seconds: float = DEFAULT_REQUEST_INTERVAL_SECONDS,
     root: Path | None = None,
     notes: str | None = None,
+    keep_raw: bool = False,
 ) -> dict:
     """
     Run an automated intermediate audit with Google AI and import the result.
 
-    Calls the API once per selected chunk (respecting rate limits), then saves
-    a versioned audit file via ``import_intermediate_audit``.
+    Model output is sanitized before save to remove scratchpad/reasoning noise.
     """
     course_path = resolve_course_path(course_name, root)
     entry = find_source_by_id(course_name, source_id, root)
@@ -151,6 +177,19 @@ def run_intermediate_audit_for_source(
     instructions = build_intermediate_audit_instructions()
     chunk_sections: list[tuple[str, str]] = []
     api_errors: list[str] = []
+    chunk_sanitization: list[dict] = []
+
+    raw_debug_dir: Path | None = None
+    if keep_raw:
+        raw_debug_dir = _raw_debug_dir(course_path, normalized_id)
+        raw_debug_dir.mkdir(parents=True, exist_ok=True)
+
+    totals = {
+        "raw_word_count": 0,
+        "cleaned_word_count": 0,
+        "sanitizer_removed_words": 0,
+        "sanitizer_removed_characters": 0,
+    }
 
     for index, item in enumerate(items):
         chunk_id = item["chunk_id"]
@@ -161,7 +200,7 @@ def run_intermediate_audit_for_source(
         )
 
         try:
-            section_text = generate_content(
+            raw_text = generate_content(
                 api_key=resolved_key,
                 model=model,
                 system_instruction=instructions,
@@ -169,7 +208,17 @@ def run_intermediate_audit_for_source(
                 max_output_tokens=max_output_tokens,
                 disable_thinking=True,
             )
-            chunk_sections.append((chunk_id, section_text))
+            if keep_raw and raw_debug_dir is not None:
+                (raw_debug_dir / f"{chunk_id}_raw.md").write_text(
+                    raw_text, encoding="utf-8"
+                )
+
+            clean_text, stats = sanitize_audit_output_with_stats(raw_text)
+            chunk_sanitization.append({"chunk_id": chunk_id, **stats})
+            for key in totals:
+                totals[key] += stats.get(key, 0)
+
+            chunk_sections.append((chunk_id, clean_text))
         except (GoogleGenAIConnectionError, GoogleGenAIAPIError) as exc:
             api_errors.append(f"{chunk_id}: {exc}")
             chunk_sections.append((chunk_id, f"_Audit API error: {exc}_"))
@@ -187,9 +236,13 @@ def run_intermediate_audit_for_source(
         model=model,
         chunk_sections=chunk_sections,
         warnings=warnings,
+        sanitization=totals,
     )
 
     import_notes = notes or f"Automated run; model={model}; chunks={len(items)}"
+    import_notes += (
+        f"; sanitized removed {totals['sanitizer_removed_words']} words"
+    )
     import_summary = import_intermediate_audit(
         course_name,
         source_id,
@@ -210,5 +263,8 @@ def run_intermediate_audit_for_source(
         "saved_path": import_summary.get("saved_path"),
         "warnings": warnings,
         "api_errors": api_errors,
+        "sanitization": totals,
+        "chunk_sanitization": chunk_sanitization,
+        "raw_debug_dir": str(raw_debug_dir.resolve()) if raw_debug_dir else None,
         "status": "failed" if api_errors and len(api_errors) == len(items) else "imported",
     }

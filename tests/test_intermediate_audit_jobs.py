@@ -91,7 +91,11 @@ class TestIntermediateAuditJobs(unittest.TestCase):
     def test_run_imports_audit(
         self, _sleep: mock.Mock, mock_gen: mock.Mock
     ) -> None:
-        mock_gen.return_value = "Verdict: Correct."
+        mock_gen.return_value = (
+            "Wait, let me check.\n\n"
+            "## Audit — SRC-0001-CHUNK-0001\n\n"
+            "No major issues found.\n"
+        )
         summary = run_intermediate_audit_for_source(
             "ECA1010_Test",
             "SRC-0001",
@@ -100,8 +104,33 @@ class TestIntermediateAuditJobs(unittest.TestCase):
             root=self.root,
         )
         self.assertEqual(summary["status"], "imported")
-        self.assertTrue(Path(summary["saved_path"]).is_file())
+        saved = Path(summary["saved_path"])
+        self.assertTrue(saved.is_file())
+        content = saved.read_text(encoding="utf-8")
+        self.assertNotIn("Wait, let me check", content)
+        self.assertIn("No major issues found", content)
+        self.assertGreater(summary["sanitization"]["sanitizer_removed_words"], 0)
         self.assertEqual(mock_gen.call_count, 1)
+
+    @mock.patch("studyforge.core.intermediate_audit_jobs.generate_content")
+    @mock.patch("studyforge.core.intermediate_audit_jobs.time.sleep")
+    def test_keep_raw_saves_debug_files(
+        self, _sleep: mock.Mock, mock_gen: mock.Mock
+    ) -> None:
+        mock_gen.return_value = "Wait.\n\n## Audit — SRC-0001-CHUNK-0001\n\nOK\n"
+        summary = run_intermediate_audit_for_source(
+            "ECA1010_Test",
+            "SRC-0001",
+            api_key="fake-key",
+            request_interval_seconds=0,
+            keep_raw=True,
+            root=self.root,
+        )
+        raw_path = (
+            Path(summary["raw_debug_dir"]) / "SRC-0001-CHUNK-0001_raw.md"
+        )
+        self.assertTrue(raw_path.is_file())
+        self.assertIn("Wait.", raw_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -53,6 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Seconds between API calls (rate limit; 0 to disable)",
     )
     parser.add_argument("--notes", default=None)
+    parser.add_argument(
+        "--keep-raw",
+        action="store_true",
+        help="Save raw model outputs under 04_Intermediate_Audits/<source>/raw_debug/",
+    )
     return parser
 
 
@@ -70,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             max_output_tokens=args.max_output_tokens,
             request_interval_seconds=args.request_interval,
             notes=args.notes,
+            keep_raw=args.keep_raw,
         )
     except CourseNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -93,6 +99,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Model:\n{summary['model']}\n")
     print(f"Chunks audited:\n{summary['chunk_count']}\n")
     print(f"Saved:\n{summary.get('saved_path', '')}\n")
+    if summary.get("sanitization"):
+        s = summary["sanitization"]
+        print(
+            "Sanitization:\n"
+            f"  raw words: {s.get('raw_word_count', 0)}\n"
+            f"  cleaned words: {s.get('cleaned_word_count', 0)}\n"
+            f"  removed words: {s.get('sanitizer_removed_words', 0)}\n"
+        )
+    if summary.get("raw_debug_dir"):
+        print(f"Raw debug:\n{summary['raw_debug_dir']}\n")
     if summary.get("warnings"):
         print("Warnings:")
         for w in summary["warnings"]:

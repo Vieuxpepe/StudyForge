@@ -73,7 +73,46 @@ Rules:
 * Use the source chunks as the highest authority.
 * If the source does not support a claim, say "not verified."
 * Preserve chunk IDs.
-* Be strict but fair."""
+* Be strict but fair.
+
+Output rules (mandatory):
+
+* Output ONLY the final audit report for this chunk. No private reasoning or scratchpad.
+* Do NOT include chain-of-thought, planning notes, drafting notes, or self-corrections.
+* Do NOT write phrases such as: Wait, Let me check, Self-Correction, Final Plan, Final Decision,
+  I should, I will, Let's look, Let's re-read, Ready to output, One more check, or similar.
+* Be concise and structured.
+* Use this exact structure:
+
+## Audit — <CHUNK_ID>
+
+### Issue 1
+
+**Original claim:**
+...
+
+**Verdict:** Correct / Incomplete / Misleading / Wrong / Not verified by source
+
+**Corrected version:**
+...
+
+**Source support:**
+...
+
+**Why this matters:**
+...
+
+(Repeat ### Issue N for additional issues.)
+
+If no major issues are found:
+
+## Audit — <CHUNK_ID>
+
+No major issues found.
+
+### Minor improvements
+
+* ..."""
 
 
 def load_json(path: Path) -> dict:

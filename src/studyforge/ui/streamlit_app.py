@@ -21,6 +21,7 @@ from studyforge.core.digest_jobs import (
 )
 from studyforge.core.extraction_jobs import extract_registered_source
 from studyforge.core.intermediate_audit_jobs import run_intermediate_audit_for_source
+from studyforge.core.pipeline_status import STEP_ORDER, get_pipeline_status
 from studyforge.core.paths import find_project_root, get_courses_dir, load_config
 from studyforge.core.secrets import get_google_api_key, set_google_api_key
 from studyforge.core.sources import add_source, list_sources, resolve_course_path
@@ -34,6 +35,11 @@ from studyforge.llm.lm_studio_client import (
     choose_default_model,
 )
 from studyforge.study.digest_review import review_local_digest_for_source
+from studyforge.study.study_pack import (
+    FinalAuditNotFoundError,
+    StudyPackOutputExistsError,
+    generate_study_pack,
+)
 from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_no
 
 NAV_PAGES = [
@@ -127,6 +133,131 @@ def _select_source(sources: list[dict], key: str = "source_picker") -> str | Non
 
 def _show_exception(exc: Exception) -> None:
     st.error(f"{type(exc).__name__}: {exc}")
+
+
+def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
+    """Show pipeline checklist, warnings, and next recommended action."""
+    st.subheader("Pipeline Doctor")
+    if st.button("Refresh pipeline status", key=f"refresh_pipeline_{source_id}"):
+        st.session_state.pop(f"pipeline_status_{source_id}", None)
+
+    cache_key = f"pipeline_status_{source_id}"
+    if cache_key not in st.session_state:
+        try:
+            st.session_state[cache_key] = get_pipeline_status(course_name, source_id)
+        except Exception as exc:
+            _show_exception(exc)
+            return None
+
+    status = st.session_state[cache_key]
+    action = status.get("next_action", {})
+
+    st.info(
+        f"**Next:** {action.get('label', '—')} — {action.get('reason', '')}"
+    )
+    if action.get("gui_hint"):
+        st.caption(action["gui_hint"])
+
+    st.write(f"Registry status: `{status.get('registry_status', 'unknown')}`")
+
+    for key, label in STEP_ORDER:
+        step = status["steps"][key]
+        icon = "✅" if step["done"] else "⬜"
+        detail = step.get("details") or ""
+        line = f"{icon} **{label}**"
+        if detail:
+            line += f" — {detail}"
+        st.write(line)
+
+    warnings = status.get("warnings") or []
+    if warnings:
+        st.write("**Warnings**")
+        for warning in warnings:
+            st.warning(warning)
+
+    return status
+
+
+def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict | None) -> None:
+    """Generate and preview study pack outputs from the latest final audit."""
+    st.subheader("Study Pack")
+    st.caption(
+        "Deterministic export from the latest imported final audit (no AI). "
+        "Requires a final audit on disk."
+    )
+
+    action_key = (pipeline_status or {}).get("next_action", {}).get("key", "")
+    if action_key == "generate_study_pack":
+        st.info(
+            "Pipeline Doctor: final audit is imported — generate your study pack below."
+        )
+
+    pack_overwrite = st.checkbox(
+        "Overwrite existing study pack files",
+        value=False,
+        key=f"study_pack_overwrite_{source_id}",
+    )
+
+    if st.button("Generate study pack", key=f"gen_study_pack_{source_id}"):
+        try:
+            with st.spinner("Generating study pack…"):
+                summary = generate_study_pack(
+                    course_name,
+                    source_id,
+                    overwrite=pack_overwrite,
+                )
+            st.session_state.pop(f"pipeline_status_{source_id}", None)
+            _show_result_summary("Study pack generated", summary)
+            st.rerun()
+        except StudyPackOutputExistsError as exc:
+            st.error(str(exc))
+        except FinalAuditNotFoundError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    try:
+        sources = {s["id"]: s for s in list_sources(course_name)}
+        entry = sources.get(source_id)
+    except Exception:
+        entry = None
+
+    if not entry:
+        return
+
+    output_paths = [
+        ("Manifest", entry.get("study_pack_manifest_path")),
+        ("Final study guide", entry.get("final_study_guide_path")),
+        ("Flashcards", entry.get("flashcards_path")),
+        ("Formula sheet", entry.get("formula_sheet_path")),
+        ("Practice quiz", entry.get("practice_quiz_path")),
+        ("Active recall", entry.get("active_recall_path")),
+        ("Weak points seed", entry.get("weak_points_seed_path")),
+    ]
+    existing = [(label, p) for label, p in output_paths if p and Path(p).is_file()]
+    if not existing:
+        return
+
+    st.write("**Study pack outputs**")
+    for label, path_str in existing:
+        st.write(f"- **{label}:** `{path_str}`")
+
+    preview_labels = [p[0] for p in existing if p[0] != "Manifest"]
+    preview_map = {p[0]: p[1] for p in existing if p[0] != "Manifest"}
+    if preview_labels:
+        pick = st.selectbox(
+            "Preview study pack file",
+            preview_labels,
+            key=f"study_pack_preview_{source_id}",
+        )
+        path = Path(preview_map[pick])
+        if path.suffix.lower() in {".md", ".txt"}:
+            st.text_area(
+                pick,
+                read_text_preview(path),
+                height=300,
+                key=f"study_pack_preview_text_{source_id}",
+            )
 
 
 def _show_result_summary(title: str, data: dict) -> None:
@@ -272,6 +403,9 @@ def page_pipeline(course_name: str | None) -> None:
     source_id = _select_source(sources, key="pipeline_source")
     if not source_id:
         return
+
+    pipeline_status = _render_pipeline_doctor(course_name, source_id)
+    _render_study_pack(course_name, source_id, pipeline_status)
 
     st.subheader("LM Studio")
     col1, col2 = st.columns(2)

@@ -152,6 +152,24 @@ class TestFinalPacket(unittest.TestCase):
         self.assertIn("Gemini found one issue", text)
         self.assertTrue(Path(summary["packet_json_path"]).is_file())
 
+    def test_packet_uses_cleaned_intermediate_audit_text(self) -> None:
+        from studyforge.audits.audit_sanitizer import sanitize_audit_output
+
+        inter_dir = self.course / "04_Intermediate_Audits" / "SRC-0001"
+        audit_path = inter_dir / "SRC-0001_intermediate_audit_v001.md"
+        raw = (
+            "Wait, scratchpad.\n\n"
+            "## Audit — SRC-0001-CHUNK-0001\n\n"
+            "### Issue 1\n\n**Verdict:** Wrong\n"
+        )
+        audit_path.write_text(sanitize_audit_output(raw), encoding="utf-8")
+        summary = build_final_audit_packet(
+            "ECA1010_Test", "SRC-0001", root=self.root
+        )
+        packet = Path(summary["packet_path"]).read_text(encoding="utf-8")
+        self.assertNotIn("Wait, scratchpad", packet)
+        self.assertIn("**Verdict:** Wrong", packet)
+
     def test_refuse_overwrite(self) -> None:
         build_final_audit_packet("ECA1010_Test", "SRC-0001", root=self.root)
         with self.assertRaises(FinalPacketOutputExistsError):
