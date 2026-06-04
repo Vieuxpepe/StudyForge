@@ -17,6 +17,7 @@ from studyforge.core.secrets import get_google_api_key
 from studyforge.core.sources import resolve_course_path
 from studyforge.study.active_recall import get_active_recall_pipeline_warnings
 from studyforge.study.mistakes import get_mistakes_pipeline_warning
+from studyforge.study.review_planner import get_review_plan_pipeline_hint
 from studyforge.study.weak_points import get_weak_points_pipeline_warning
 
 STUDY_OUTPUTS_BASE = Path("06_Study_Outputs")
@@ -329,6 +330,10 @@ def get_pipeline_status(
     weak_warning = get_weak_points_pipeline_warning(course_path.name, root)
     if weak_warning:
         warnings.append(weak_warning)
+
+    plan_hint = get_review_plan_pipeline_hint(course_path.name, root)
+    if plan_hint:
+        warnings.append(plan_hint)
 
     completed_steps = [label for key, label in STEP_ORDER if steps[key]["done"]]
     missing_steps = [label for key, label in STEP_ORDER if not steps[key]["done"]]

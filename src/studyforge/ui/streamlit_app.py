@@ -21,6 +21,12 @@ from studyforge.core.digest_jobs import (
 )
 from studyforge.core.extraction_jobs import extract_registered_source
 from studyforge.core.intermediate_audit_jobs import run_intermediate_audit_for_source
+from studyforge.core.guided_workflow import (
+    UnsupportedGuidedActionError,
+    default_guided_options,
+    get_guided_next_action,
+    run_guided_next_step,
+)
 from studyforge.core.pipeline_status import STEP_ORDER, get_pipeline_status
 from studyforge.core.paths import find_project_root, get_courses_dir, load_config
 from studyforge.core.secrets import get_google_api_key, set_google_api_key
@@ -58,6 +64,11 @@ from studyforge.study.study_pack import (
     FinalAuditNotFoundError,
     StudyPackOutputExistsError,
     generate_study_pack,
+)
+from studyforge.study.review_planner import (
+    ReviewPlanExistsError,
+    generate_review_plan,
+    get_review_plan_path,
 )
 from studyforge.study.weak_points import (
     InvalidConfidenceError,
@@ -165,34 +176,168 @@ def _show_exception(exc: Exception) -> None:
     st.error(f"{type(exc).__name__}: {exc}")
 
 
-def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
-    """Show pipeline checklist, warnings, and next recommended action."""
-    st.subheader("Pipeline Doctor")
-    if st.button("Refresh pipeline status", key=f"refresh_pipeline_{source_id}"):
-        st.session_state.pop(f"pipeline_status_{source_id}", None)
-
+def _get_pipeline_status_cached(
+    course_name: str, source_id: str, force_refresh: bool = False
+) -> dict | None:
     cache_key = f"pipeline_status_{source_id}"
+    if force_refresh:
+        st.session_state.pop(cache_key, None)
     if cache_key not in st.session_state:
         try:
             st.session_state[cache_key] = get_pipeline_status(course_name, source_id)
         except Exception as exc:
             _show_exception(exc)
             return None
+    return st.session_state[cache_key]
 
-    status = st.session_state[cache_key]
+
+def _render_guided_workflow(course_name: str, source_id: str) -> None:
+    """One-click next step from Pipeline Doctor (not autonomous)."""
+    st.subheader("Guided Workflow")
+    st.caption(
+        "The **Run next recommended step** button uses Pipeline Doctor to run "
+        "exactly one next step. It is not autonomous and does not loop through "
+        "the full pipeline."
+    )
+
+    try:
+        guided = get_guided_next_action(course_name, source_id)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.write(f"**Registry status:** `{guided.get('registry_status', 'unknown')}`")
+    st.info(
+        f"👉 **Next recommended action:** {guided.get('label', '—')}\n\n"
+        f"{guided.get('reason', '')}"
+    )
+    st.write(guided.get("description", ""))
+    if guided.get("warning"):
+        st.warning(guided["warning"])
+
+    for warning in guided.get("warnings") or []:
+        st.warning(f"⚠️ {warning}")
+
+    st.write("**Advanced options**")
+    gw_overwrite = st.checkbox(
+        "Overwrite outputs",
+        value=st.session_state.overwrite,
+        key=f"gw_overwrite_{source_id}",
+    )
+    st.session_state.overwrite = gw_overwrite
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.session_state.lm_base_url = st.text_input(
+            "LM Studio base URL",
+            value=st.session_state.lm_base_url,
+            key=f"gw_lm_url_{source_id}",
+        )
+    with c2:
+        st.session_state.lm_model = st.text_input(
+            "Model (empty = first from /models)",
+            value=st.session_state.lm_model,
+            key=f"gw_lm_model_{source_id}",
+        )
+
+    st.session_state.max_digest_tokens = st.number_input(
+        "Max digest tokens",
+        min_value=1000,
+        max_value=32000,
+        value=int(st.session_state.max_digest_tokens),
+        step=500,
+        key=f"gw_max_tokens_{source_id}",
+    )
+
+    cc1, cc2, cc3 = st.columns(3)
+    with cc1:
+        st.session_state.max_words = st.number_input(
+            "Max words (chunking)",
+            min_value=100,
+            value=int(st.session_state.max_words),
+            key=f"gw_max_words_{source_id}",
+        )
+    with cc2:
+        st.session_state.overlap_words = st.number_input(
+            "Overlap words (chunking)",
+            min_value=0,
+            value=int(st.session_state.overlap_words),
+            key=f"gw_overlap_{source_id}",
+        )
+    with cc3:
+        gw_full_digest = st.checkbox(
+            "Run full digest (not first chunk only)",
+            value=False,
+            key=f"gw_full_digest_{source_id}",
+        )
+
+    can_run = guided.get("can_run", False)
+    if st.button(
+        "Run next recommended step",
+        disabled=not can_run,
+        key=f"gw_run_{source_id}",
+    ):
+        options = default_guided_options()
+        options.update(
+            {
+                "overwrite": gw_overwrite,
+                "base_url": st.session_state.lm_base_url,
+                "model": st.session_state.lm_model or None,
+                "max_tokens": int(st.session_state.max_digest_tokens),
+                "max_words": int(st.session_state.max_words),
+                "overlap_words": int(st.session_state.overlap_words),
+                "full_digest": gw_full_digest,
+            }
+        )
+        try:
+            with st.spinner(f"Running: {guided.get('label', 'step')}…"):
+                result = run_guided_next_step(
+                    course_name,
+                    source_id,
+                    options=options,
+                )
+            st.session_state.pop(f"pipeline_status_{source_id}", None)
+            _show_result_summary(result.get("message", "Step complete"), result.get("summary", {}))
+            st.rerun()
+        except UnsupportedGuidedActionError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+    elif not can_run:
+        st.caption("This step must be done manually (see hint above).")
+
+
+def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
+    """Show pipeline checklist, warnings, and next recommended action."""
+    st.subheader("Pipeline Doctor")
+    if st.button("Refresh pipeline status", key=f"refresh_pipeline_{source_id}"):
+        status = _get_pipeline_status_cached(course_name, source_id, force_refresh=True)
+    else:
+        status = _get_pipeline_status_cached(course_name, source_id)
+
+    if status is None:
+        return None
+
     action = status.get("next_action", {})
 
     st.info(
-        f"**Next:** {action.get('label', '—')} — {action.get('reason', '')}"
+        f"👉 **Next:** {action.get('label', '—')} — {action.get('reason', '')}"
     )
     if action.get("gui_hint"):
         st.caption(action["gui_hint"])
 
-    st.write(f"Registry status: `{status.get('registry_status', 'unknown')}`")
+    st.write(f"**Registry status:** `{status.get('registry_status', 'unknown')}`")
+
+    completed = status.get("completed_steps") or []
+    missing = status.get("missing_steps") or []
+    if completed:
+        st.write(f"✅ **Completed:** {', '.join(completed)}")
+    if missing:
+        st.write(f"⏳ **Missing:** {', '.join(missing)}")
 
     for key, label in STEP_ORDER:
         step = status["steps"][key]
-        icon = "✅" if step["done"] else "⬜"
+        icon = "✅" if step["done"] else "⏳"
         detail = step.get("details") or ""
         line = f"{icon} **{label}**"
         if detail:
@@ -203,7 +348,7 @@ def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
     if warnings:
         st.write("**Warnings**")
         for warning in warnings:
-            st.warning(warning)
+            st.warning(f"⚠️ {warning}")
 
     return status
 
@@ -435,8 +580,12 @@ def page_pipeline(course_name: str | None) -> None:
     if not source_id:
         return
 
+    _render_guided_workflow(course_name, source_id)
     pipeline_status = _render_pipeline_doctor(course_name, source_id)
     _render_study_pack(course_name, source_id, pipeline_status)
+
+    st.subheader("Manual pipeline controls")
+    st.caption("Run individual steps yourself (same backend as Guided Workflow).")
 
     st.subheader("LM Studio")
     col1, col2 = st.columns(2)
@@ -486,8 +635,6 @@ def page_pipeline(course_name: str | None) -> None:
         st.session_state.overwrite = st.checkbox(
             "Overwrite outputs", value=st.session_state.overwrite
         )
-
-    st.subheader("Run steps")
 
     if st.button("1. Extract PDF"):
         try:
@@ -902,6 +1049,52 @@ def page_review_tracker(course_name: str | None) -> None:
     st.caption(
         "Track mistakes and weak points from active recall (deterministic, no AI)."
     )
+
+    st.subheader("Review Session Planner")
+    plan_limit = st.number_input(
+        "Priority item limit",
+        min_value=1,
+        max_value=50,
+        value=10,
+        key="rt_plan_limit",
+    )
+    plan_overwrite = st.checkbox(
+        "Overwrite today's plan if it exists",
+        value=False,
+        key="rt_plan_overwrite",
+    )
+    if st.button("Generate today's review plan", key="rt_gen_plan"):
+        try:
+            summary = generate_review_plan(
+                course_name,
+                limit=int(plan_limit),
+                overwrite=plan_overwrite,
+            )
+            st.success("Review plan generated.")
+            st.write(f"**Mistakes:** {summary['mistake_count']}")
+            st.write(f"**Weak points:** {summary['weak_point_count']}")
+            st.write(f"**Active recall redo:** {summary['active_recall_review_count']}")
+            st.write(f"**Top priorities:** {summary['priority_count']}")
+            st.code(summary["markdown_path"])
+            st.rerun()
+        except ReviewPlanExistsError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    try:
+        course_path = resolve_course_path(course_name)
+        today_plan = get_review_plan_path(course_path)
+        if today_plan.is_file():
+            st.caption(f"Latest plan: `{today_plan}`")
+            st.text_area(
+                "Plan preview",
+                read_text_preview(today_plan, max_chars=12000),
+                height=280,
+                key="rt_plan_preview",
+            )
+    except Exception:
+        pass
 
     sources = _source_options(course_name)
     source_id = _select_source(sources, key="rt_source")

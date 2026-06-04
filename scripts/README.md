@@ -4,6 +4,7 @@ Utility and setup scripts.
 
 - `launch_gui.py` — start Streamlit GUI (`app.py`)
 - `pipeline_status.py` — pipeline checklist and next recommended step (`--course`, `--source-id`)
+- `run_next_step.py` — run one guided Pipeline Doctor step (`--course`, `--source-id`; optional `--overwrite`, `--base-url`, `--model`, `--max-tokens`, `--max-words`, `--overlap-words`, `--full-digest`, `--only-needs-review`)
 
 - `init_studyforge_structure.py` — idempotent project scaffold (folders + placeholders)
 - `create_course.py` — create a new course from `_Course_Template` (`--code`, `--name`, `--list`)
@@ -22,3 +23,4 @@ Utility and setup scripts.
 - `active_recall.py` — list questions, record self-graded attempts, export summary (`--list`, `--record`, `--summary`); optional `--create-mistake`, `--create-weak-point`, `--weak-point-concept` on `--record`; logs under `07_My_Work/active_recall_logs/`; GUI **Active Recall** page
 - `mistakes.py` — course mistakes log (`--list`, `--add`, `--update-status`, `--export`); files `07_My_Work/mistakes_log.json` / `mistakes_log.md`
 - `weak_points.py` — weak points tracker (`--list`, `--add`, `--update`, `--export`); files `07_My_Work/weak_points.json` / `weak_points.md`; GUI **Review Tracker** page
+- `review_plan.py` — generate daily review plan Markdown + JSON (`--course`, optional `--date`, `--limit`, `--overwrite`); output under `07_My_Work/review_sessions/`; GUI **Review Tracker** → **Review Session Planner**

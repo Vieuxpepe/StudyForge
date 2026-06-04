@@ -9,6 +9,8 @@ Work through one source end-to-end on your machine.
 - [ ] Create/select course
 - [ ] Upload/register a real PDF
 - [ ] Confirm source appears in dashboard
+- [ ] Try **Run next recommended step** on Pipeline (Guided Workflow) for one step
+- [ ] Confirm Pipeline Doctor updates after the guided step
 - [ ] Extract PDF
 - [ ] Open extracted text preview
 - [ ] Chunk source
@@ -36,6 +38,9 @@ Work through one source end-to-end on your machine.
 - [ ] Create a weak point from a weak attempt (or add manually)
 - [ ] Export mistakes and weak points Markdown
 - [ ] Confirm `07_My_Work/mistakes_log.json` and `weak_points.json` exist
+- [ ] Generate today's review plan on **Review Tracker**
+- [ ] Open `07_My_Work/review_sessions/YYYY-MM-DD_review_plan.md`
+- [ ] Confirm priorities match your open mistakes / weak points / recall gaps
 
 ## Pass criteria
 
@@ -51,7 +56,8 @@ Work through one source end-to-end on your machine.
 |------|----------------|
 | Course | Sidebar + **Courses** |
 | Source PDF | **Sources** |
-| Extract / chunk / digest / review | **Pipeline** |
+| Guided next step | **Pipeline** → **Guided Workflow** |
+| Extract / chunk / digest / review | **Pipeline** (manual controls) |
 | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
 | Intermediate/final audits | **Audits** |
 | Active recall practice | **Active Recall** |

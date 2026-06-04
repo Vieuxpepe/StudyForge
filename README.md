@@ -17,7 +17,9 @@ StudyForge can:
 - **generate final study packs** from the latest final audit (deterministic parser, no AI)
 - **practice active recall** with self-grading (correct / partial / wrong / skipped, no AI)
 - **track mistakes and weak points** from recall practice (manual, deterministic)
+- **generate daily review plans** from open mistakes, weak points, and weak recall attempts
 - show **Pipeline Doctor** status and next recommended step in the GUI
+- **guided workflow** — run one recommended pipeline step per click (not autonomous)
 
 Outputs live under each course folder (for example `02_Extracted_Text/`, `03_Local_Digests/`, `04_Intermediate_Audits/`, `05_Final_Audits/`, `06_Study_Outputs/`).
 
@@ -38,10 +40,10 @@ python scripts/launch_gui.py
 
 1. **Courses** — create or select a course.
 2. **Sources** — upload a PDF.
-3. **Pipeline** — extract, chunk, local digest, review; use **Pipeline Doctor** for the next step; after a final audit, use **Study Pack** to generate guides and flashcards.
+3. **Pipeline** — **Guided Workflow** runs one Pipeline Doctor step per click; **Pipeline Doctor** shows progress; manual controls remain below; after a final audit, use **Study Pack**.
 4. **Audits** — export/import intermediate and final audits (or run automated intermediate audit if Google API key is set).
 5. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
-6. **Review Tracker** — mistakes log, weak points, and promote weak recall attempts to trackers.
+6. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
 7. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
 
 The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
@@ -108,6 +110,25 @@ python scripts/weak_points.py --course ECA1010_Microeconomics --list
 python scripts/weak_points.py --course ECA1010_Microeconomics --export
 ```
 
+Review session plan (deterministic daily priorities from mistakes, weak points, and active recall):
+
+```bash
+python scripts/review_plan.py --course ECA1010_Microeconomics
+python scripts/review_plan.py --course ECA1010_Microeconomics --limit 5 --overwrite
+python scripts/review_plan.py --course ECA1010_Microeconomics --date 2026-06-04
+```
+
+Guided Workflow (one step per click; uses Pipeline Doctor `next_action`):
+
+```bash
+python scripts/run_next_step.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/run_next_step.py --course ECA1010_Microeconomics --source-id SRC-0001 --full-digest
+python scripts/run_next_step.py --course ECA1010_Microeconomics --source-id SRC-0001 \
+  --base-url "http://192.168.2.152:1234/v1" --model "google/gemma-4-e4b"
+```
+
+The **Run next recommended step** button in the GUI runs exactly one step. It does not loop through the full pipeline and does not call Google AI for intermediate audits automatically (export packet only).
+
 Check progress anytime:
 
 ```bash
@@ -163,6 +184,18 @@ Tests: `tests/test_audit_sanitizer.py`, `tests/test_intermediate_audit_jobs.py`.
 ## More CLI detail
 
 Individual scripts (flags, overwrite, limits) are listed in [scripts/README.md](scripts/README.md).
+
+## Tests
+
+Local:
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+GitHub Actions:
+
+Tests run automatically on push and pull requests (workflow: **StudyForge Tests** in `.github/workflows/tests.yml`). CI uses Python 3.11, installs `requirements.txt`, and runs the same unittest command. No LM Studio or API keys are required — tests use temporary directories and mocks.
 
 ## Layout
 
