@@ -12,8 +12,8 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from studyforge.study.digest_sections import check_required_sections  # noqa: E402
 from studyforge.study.digest_review import (  # noqa: E402
-    check_required_sections,
     count_uncertainty_markers,
     review_digest_file,
     review_local_digest_for_source,

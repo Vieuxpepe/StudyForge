@@ -16,106 +16,121 @@ Chunk count:
 
 ## SRC-0001-CHUNK-0001
 
-# Local Digest for SRC-0001-CHUNK-0001
+The user wants me to create a structured study digest based on the provided source material (SRC-0001) and chunk (SRC-0001-CHUNK-0001).
+I must follow strict formatting rules, ensuring every required section is present and filled accurately, while adhering to the content constraints (no inventing facts, no over-compressing, preserving references, marking uncertainty).
+
+Plan:
+1. Review the source material chunk for main themes.
+2. Populate each required Markdown section using only information from the text.
+3. Ensure all headings are present and in order.
+4. Conclude with the Source References section.# Local Digest for SRC-0001-CHUNK-0001
 
 ## Big Picture
 
-This source chunk provides a comprehensive overview of inflation, defining it as a generalized increase in the average price level of goods and services. It details how this phenomenon is measured (using the Consumer Price Index or IPC), explores various types of price changes (hyperinflation, deflation, disinflation), analyzes the sources that drive inflation (demand, cost, wages, monetary), discusses its economic consequences, and introduces methods for calculating both the CPI and the rate of inflation.
+This material covers the concept of inflation, defining it as a generalized rise in the average price level of goods and services over time (Page 2). It details how inflation is measured using indices like the Consumer Price Index (IPC) (Pages 2, 3), explores various causes of inflation (demand-pull, cost-push, monetary), discusses its consequences (like loss of purchasing power), and provides methods for calculating inflation rates and real vs. nominal values (Pages 10, 13, 14).
 
 ## Key Ideas
 
-*   **Measurement:** The primary tool for measuring average price increases is the Consumer Price Index (IPC).
-*   **Inflation Dynamics:** Inflation can be driven by an excess of demand over supply (demand-pull) or by rising costs of inputs (cost-push), such as raw materials or wages.
-*   **Price Change Nuances:** It is crucial to distinguish between **Deflation** (generalized, prolonged price *decrease*) and **Disinflation** (a *slowing down* of the rate of price increase).
-*   **Real vs. Nominal Values:** Inflation necessitates adjusting prices using inflation indices (like IPC) to determine the true purchasing power or value over time.
-*   **Monetary Policy:** Central banks (like the Bank of Canada) manage monetary policy by setting an inflation target to maintain stable economic confidence and support growth.
+*   **Inflation:** A generalized increase in the average price level of goods and services over a period (Page 2).
+*   **Measurement:** The Consumer Price Index (IPC) is used to measure the average price level (Pages 2, 3).
+*   **Types of Inflation Changes:** Understanding the difference between hyper-inflation (rapid, extreme increases), deflation (prolonged general price decrease), and disinflation (slowing down of price increases) is crucial (Page 7).
+*   **Causes:** Inflation can stem from increased demand relative to supply (demand-pull), decreases in supply (scarcity), rising costs (importation or wages), or changes in the money supply (monetary inflation) (Pages 8, 9).
+*   **Real vs. Nominal Values:** Adjusting for inflation is necessary to compare purchasing power across different time periods (Page 15, 17).
+*   **Interest Rates:** The relationship between real interest rates, nominal interest rates, and inflation is described by the Fisher Effect (Page 18).
 
 ## Definitions
 
-| Term | Definition / Description | Source Page(s) |
-| :--- | :--- | :--- |
-| **Inflation** | A generalized increase in the average level of prices of goods and services within an economy over a given period. | 2 |
-| **Consumer Price Index (IPC)** | The index used to measure the average price level of goods and services for consumers. In Canada, it is calculated using a basket containing over 600 items grouped into 8 categories. | 2, 3 |
-| **Inflation Target** | The stable, low, and predictable inflation rate that central banks aim to maintain (e.g., the Bank of Canada's target of 2% in Canada). | 5 |
-| **Hyper-inflation** | A severe episode where the general price level increases by more than 50% per month, or more than 1000% per year. | 7 |
-| **Deflation** | In a macroeconomic context, it implies a generalized and prolonged *decrease* in the prices of goods and services. | 7 |
-| **Disinflation** | Defined as a deceleration (slowing down) of the rate of price increase (i.e., prices continue to rise, but at a slower pace). | 7 |
-| **Inflation by Costs / Imported Inflation** | Inflation caused by increases in the prices of imported raw materials, intermediate goods, or equipment, which are passed on to the final consumer price. | 9 |
-| **Inflation by Wages** | Occurs when wage increases exceed productivity growth, leading companies to raise selling prices to maintain profit maximization. | 9 |
-| **Monetary Inflation** | Price fluctuations caused by variations in the money supply (currency, deposits, treasury bonds). | 9 |
-| **Real Value vs. Nominal Value** | *Nominal value* is the price/amount measured at a specific time. *Real value* adjusts for inflation to show what that amount could actually purchase over time. | 15 |
+*   **Inflation:** A generalized rise in the average price level of goods and services in an economy over a given period (Page 2).
+*   **Consumer Price Index (IPC):** The index used to measure the average price level (Pages 2, 3).
+*   **Hyper-inflation:** Episodes where the general price level increases by more than 50% per month, or more than 1000% per year (Page 7).
+*   **Deflation:** A prolonged generalized decrease in the prices of goods and services within a macro-economic framework (Page 7).
+*   **Disinflation:** The deceleration (slowing down) of price increases (i.e., inflation continues to rise, but at a slower rate) (Page 7).
+*   **Purchasing Power:** What a given budget can buy in terms of goods and services (Page 10).
 
 ## Formulas / Rules / Methods
 
-### 1. Consumer Price Index (IPC) Calculation
-The IPC measures the cost of a fixed basket of goods in different years relative to a base year.
-
-*   **General Formula:** $\text{IPC}_{\text{année } t} = \frac{\text{coût dépenses année } t}{\text{coût dépenses année de base}} \times 100$
-*   **Base Year Rule:** The IPC for the base year is set to 100.
-
-### 2. Inflation Rate (Taux d’inflation, TI) Calculation
-
-The inflation rate measures the relative change in the IPC over a period.
-
-*   **Two Consecutive Periods ($t-1$ and $t$):**
-    $$\text{TI} = \frac{\text{IPC}_t - \text{IPC}_{t-1}}{\text{IPC}_{t-1}} \times 100$$
-*   **Over $n$ Variations (General Formula):**
-    $$\text{TI} = \left( \frac{\text{IPC}_{\text{période finale}}}{\text{IPC}_{\text{période initiale}}} - 1 \right) \times n \times 100$$
-
-### 3. Using the Deflator (Alternative TI Calculation)
-The inflation rate can also be calculated using the deflator index:
-
-*   **Two Consecutive Periods:** $\text{TI} = \frac{\text{Déflatteur}_t - \text{Déflatteur}_{t-1}}{\text{Déflatteur}_{t-1}} \times 100$
-*   **Over $n$ Variations (General Formula):** $$\text{TIAM} = \left( \frac{\text{Déflatteur}_{\text{période finale}}}{\text{Déflatteur}_{\text{période initiale}}} - 1 \right) \times n \times 100$$
-
-### 4. Fisher Equation (Interest Rates)
-This equation relates the three types of interest rates:
-
-$$\text{Taux d'intérêt réel} = \text{Taux d'intérêt nominal} - \text{Taux d'inflation}$$
+*   **IPC Calculation (Annual):** $\text{IPC}_{\text{année t}} = \frac{\text{coût de panier de l'année t}}{\text{coût de panier de l'année de base}} \times 100$ (Page 3).
+    *   $\text{IPC}_{\text{année de base}} = 100$ (Page 3).
+*   **Inflation Rate (Two Consecutive Periods):** $\text{TI} = \frac{\text{IPC}_t - \text{IPC}_{t-1}}{\text{IPC}_{t-1}} \times 100$ (Page 13).
+*   **Inflation Rate (Over $n$ Variations):** $\text{TI} = \left( \frac{\text{IPC}_{\text{date période finale}}}{\text{IPC}_{\text{date période initiale}}} - 1 \right) \times 100$ (Page 13).
+*   **Inflation Rate using Deflator:**
+    *   Two consecutive periods: $\text{TI} = \frac{\text{Déflateur}_t - \text{Déflateur}_{t-1}}{\text{Déflateur}_{t-1}} \times 100$ (Page 14).
+    *   Over $n$ variations: $\text{TIA}_{\text{M}} = \left( \frac{\text{Déflateur}_{\text{date période finale}}}{\text{Déflateur}_{\text{date période initiale}}} - 1 \right) \times 100$ (Page 14).
+*   **Fisher Effect:** $\text{Taux d'intérêt réel} = \text{Taux d'intérêt nominal} - \text{Taux d'inflation}$ (Page 18).
 
 ## Step-by-Step Procedures
 
-**A. Calculating IPC:**
-1.  Determine the fixed basket of goods (quantities).
-2.  Calculate the total cost of this basket in Year 1 ($\text{Coût}_{\text{année } 1}$).
-3.  Set $\text{IPC}_{\text{année de base}} = 100$.
-4.  For subsequent years, calculate the ratio: $\frac{\text{Coût dépenses année } t}{\text{Coût dépenses année de base}}$.
-
-**B. Calculating Inflation Rate (TI):**
-1.  Identify the IPC for the starting period ($\text{IPC}_{\text{initial}}$) and the ending period ($\text{IPC}_{\text{final}}$).
-2.  Use the general formula: $\left( \frac{\text{IPC}_{\text{final}}}{\text{IPC}_{\text{initial}}} - 1 \right) \times n \times 100$.
-
-**C. Adjusting for Inflation (Real Value):**
-To find the equivalent price of a good purchased in Year A, when measured by the prices of Year B:
-$$\text{Prix en année B} = \text{Prix initial} \times \left( \frac{\text{IPC}_{\text{année B}}}{\text{IPC}_{\text{année A}}} \right)$$
+1.  **Calculate IPC:** Determine the cost of a representative basket of goods in the current year and divide it by the cost in the base year, multiplying by 100 (Pages 3, 20).
+2.  **Calculate Inflation Rate (IPC):** Use the formula $\text{TI} = \frac{\text{IPC}_t - \text{IPC}_{t-1}}{\text{IPC}_{t-1}} \times 100$ for two periods, or the ratio method for multiple periods (Pages 13, 20).
+3.  **Calculate Real Value:** To find the equivalent price of a good from an earlier year in later prices, multiply the original price by $(\text{IPC}_{\text{final}} / \text{IPC}_{\text{initial}})$ (Page 17).
 
 ## Worked Examples from the Source
 
-**1. The Uncle's Beer Story (Page 16-17):**
-*   **Scenario:** Price of beer in 1975 was \$10.00; price in 1995 was \$24.00. $\text{IPC}_{1975} = 34.5$; $\text{IPC}_{1995} = 104.2$.
-*   **Goal (a): Equivalent 1975 price in 1995 dollars:**
-    $$\$10.00 \times \left( \frac{104.2}{34.5} \right) = \$30.20$$
-*   **Goal (b): Equivalent 1995 price in 1975 dollars:**
-    $$\$24.00 \times \left( \frac{34.5}{104.2} \right) = \$7.95$$
-*   **Conclusion:** Both methods show that, when adjusted for inflation, the beer was more expensive in 1975 than it was in 1995.
-
-**2. Application 1 (Page 20):**
-*   **Basket:** 2 units of A and 3 units of B. Base Year = Year 1.
-*   **IPC Calculation:**
-    *   $\text{IPC}_{\text{Year } 1} = 100$ (Base)
-    *   $\text{IPC}_{\text{Year } 2} = \frac{(2 \times 4 + 3 \times 2)}{(2 \times 2 + 3 \times 1)} \times 100 = \frac{14}{7} \times 100 = 200$
-    *   $\text{IPC}_{\text{Year } 3} = \frac{(6 \times 2 + 3 \times 4)}{(2 \times 2 + 3 \times 1)} \times 100 = \frac{24}{7} \times 100 = 342$
-*   **Inflation Rate (TI):**
-    *   Year 1 to Year 2: $\left( \frac{200 - 100}{100} \right) \times 100 = 100\%$
-    *   Year 1 to Year 3: $\left( \frac{342}{100} - 1 \right) \times 2 \times 100 = 84.93\%$
+*   **Inflation Rate Calculation (Application 1):**
+    *   $\text{IPC}_{\text{Année 2}} = \frac{\text{Coût panier année 2}}{\text{Coût panier année 1}} \times 100 = \frac{14}{7} \times 100 = 200$ (Page 20).
+    *   $\text{IPC}_{\text{Année 3}} = \frac{\text{Coût panier année 3}}{\text{Coût panier année 1}} \times 100 = \frac{24}{7} \times 100 = 342$ (Page 20).
+    *   Annual Inflation Rate (Year 2): $((200 - 100) / 100) * 100 = 100\%$ (Page 20).
+    *   Average Annual Inflation Rate (Year 1 to Year 3): $((342/7 - 1) / 2) * 100 \approx 84.93\%$ (Page 20).
+*   **Purchasing Power Comparison (Application Example):**
+    *   To find the equivalent price of a good from 1975 in 1995 dollars: $\$10.00 \times (104.2 / 34.5) = \$30.20$ (Page 17).
+    *   To find the equivalent price of a good from 1995 in 1975 dollars: $\$24.00 \times (34.5 / 104.2) = \$7.95$ (Page 17).
 
 ## New Practice Examples
 
-**Conceptual Example (Inflation Sources):**
-If a country experiences a sudden, sharp increase in the global price of oil (a raw material), which source of inflation is most likely to be responsible?
-*   *Answer:* Inflation by costs or imported inflation. The increased cost of oil raises production costs across many industries, which are then passed on to consumers.
+Not verified in this chunk.
 
-**Conceptual
+## Common Mistakes / Traps
+
+*   **Confusing Inflation Measures:** Students must distinguish between inflation rate calculated using the IPC formula vs. the Deflator index, and understand when to use which calculation method (Pages 13, 14).
+*   **Misinterpreting Purchasing Power:** When comparing prices across time, one must correctly adjust for inflation; simply looking at the nominal price difference is insufficient (Page 17).
+*   **Monetary vs. Real Variables:** Remembering that in the long run, money supply changes affect prices but not real variables like production or consumption (Page 18).
+
+## Things to Memorize
+
+*   The Canadian inflation target range: 1% to 3%, with a target value of 2% (Page 5).
+*   IPC calculation base year index value: 100 (Page 3).
+*   Hyper-inflation threshold: >50% increase per month or >1000% per year (Page 7).
+
+## Things to Understand Deeply
+
+*   **The Nature of Inflation:** It is a *generalized* rise in prices, not just an increase in the price of one good.
+*   **Inflationary Spiral:** Understanding the feedback loop where rising prices lead to higher wage demands, which increases production costs, leading to further price hikes (Page 12).
+*   **Monetary Neutrality (Long Run):** Grasping that while money affects prices in the short term, it does not affect real economic output or consumption patterns over the long run (Page 18).
+
+## Flashcards
+
+**Front:** What is inflation?
+**Back:** A generalized rise in the average price level of goods and services in an economy over a given period.
+
+**Front:** How is IPC calculated for year $t$?
+**Back:** $\text{IPC}_t = \frac{\text{Cost of basket in year } t}{\text{Cost of basket in base year}} \times 100$.
+
+**Front:** What does the Fisher Effect state?
+**Back:** The real interest rate equals the nominal interest rate minus the inflation rate.
+
+## Practice Questions
+
+1.  If a country experiences a period where prices rise by 5% every year for five years, what is the approximate average annual inflation rate? (Requires using the multi-period formula).
+2.  Explain how an increase in wages above productivity growth can contribute to inflation according to the source material. (Relates to wage/cost push factors).
+
+## Uncertain Claims
+
+*   The specific details regarding the calculation of "Inflation fondamentale (IPC-tronq, IPC-méd)" are mentioned but not explained or calculated in this chunk (Page 2).
+*   The exact mechanism by which the Banque du Canada maintains inflation stability is stated as a goal, but the underlying economic model supporting this is not detailed beyond mentioning monetary policy (Page 5).
+
+## Source References
+
+*   Source ID: SRC-0001
+*   Pages Covered: 1-21
+*   Specific Links/Sources Cited:
+    *   https://www150.statcan.gc.ca/n1/pub/71-607-x/2018016/cpi-ipc-fra.htm (Page 3)
+    *   https://www150.statcan.gc.ca/n1/pub/62f0014m/62f0014m2021015-fra.htm (Page 3)
+    *   DOI: https://doi.org/10.25318/1810000601-fra (Page 4)
+    *   http://www.banqueducanada.ca (Page 5)
+    *   https://www150.statcan.gc.ca/t1/tbl1/fr/tv.action?pid=1810026501 (Page 9)
+    *   https://www150.statcan.gc.ca/t1/tbl1/fr/tv.action?pid=1810026801 (Page 9)
+    *   https://www150.statcan.gc.ca/t1/tbl1/fr/tv.action?pid=1410035601 (Page 9)
+    *   Mankiw, Belzile et Pepin (2014) (Page 18)
 
 ---
 
@@ -237,94 +252,60 @@ Not verified in this chunk.
 
 ## SRC-0001-CHUNK-0003
 
-# Local Digest for SRC-0001-CHUNK-0003
+The user wants me to create a structured study digest based on the provided source chunk (SRC-0001-CHUNK-0003).
+I must follow all formatting rules:
+1.  Do not invent facts.
+2.  Do not over-compress.
+3.  Preserve source references.
+4.  Mark uncertainty.
+5.  Explain clearly.
+6.  If no supported content, write exactly: "Not verified in this chunk."
+7.  Focus on understanding and studying.
+8.  Output *every* required section through `## Source References`.
+
+The content revolves around calculating the Consumer Price Index (IPC), inflation rates, and adjusting prices for changes in cost of living using a fixed basket approach.
+
+Plan: Go through each required section and populate it based only on the text provided.# Local Digest for SRC-0001-CHUNK-0003
 
 ## Big Picture
 
-This chunk provides a comprehensive guide on calculating and interpreting key economic indicators related to cost of living, specifically focusing on the Consumer Price Index (IPC), inflation rates, and real purchasing power. The core concept is tracking how the price of a fixed "basket" of goods changes over time.
+This chunk details how to calculate and interpret key economic indicators related to the cost of living, specifically using the Consumer Price Index (IPC). The process involves establishing a base year's consumption basket, calculating costs in subsequent years, determining inflation rates over time, and adjusting prices across different years to compare real purchasing power.
 
 ## Key Ideas
 
-*   **The IPC as a Measure:** The IPC measures the average change in prices paid by urban consumers for a standard basket of goods (the consumption basket).
-*   **Base Year Importance:** The base year (2010, in this example) is assigned an IPC value of 100. All subsequent price changes are measured relative to this baseline.
-*   **Inflation vs. Price Change:** Inflation measures the *rate* at which prices increase over time, reflecting a drop in purchasing power for a fixed income.
-*   **Real vs. Nominal Prices:** To compare goods purchased in different years (e.g., 2011 vs. 2018), one must convert the price into "real dollars" of a specific year to account for inflation.
+*   **Cost of Living Measurement:** IPC tracks changes in the cost of a fixed "representative basket" of goods (e.g., juice and fabric).
+*   **Inflation Rate Calculation:** Inflation is measured by the relative change in the IPC between two periods.
+*   **Real Price Comparison:** To compare prices across different years, one must adjust them using the relevant IPC values to account for changes in purchasing power.
 
 ## Definitions
 
-| Term | Definition | Source Reference |
-| :--- | :--- | :--- |
-| **IPC (Indice des Prix à la Consommation)** | A measure used to track the average change in prices paid by consumers over time, relative to a designated base year. | Page 1 |
-| **Base Year** | The reference year for calculating the IPC, which is assigned an index value of 100. (Here: 2010). | Page 1 |
-| **Consumption Basket (Panier)** | A fixed set of goods and services used to calculate the cost of living index. The quantities in this basket remain constant across all years analyzed. | Page 1 |
-| **Inflation Rate** | The percentage increase in the general price level over a given period, calculated using the change in the IPC. | Page 1 |
-| **Real Dollars** | A unit of currency adjusted for inflation, allowing for an accurate comparison of purchasing power across different years. | Page 1 |
+*   **IPC (Indice des Prix à la Consommation):** A measure used here to track the change in the cost of a fixed basket of goods over time.
+*   **Base Year:** The year chosen as the reference point, where the IPC is set to 100 (in this example, 2010).
+*   **Pouvoir d'achat (Purchasing Power):** How much goods or services can be bought with a given amount of money; changes in price affect purchasing power.
 
 ## Formulas / Rules / Methods
 
-### 1. Determining Basket Quantities (Base Year)
-$$\text{Quantity} = \frac{\text{Total Expenditure}}{\text{Unit Price}}$$
-
-### 2. Calculating the IPC
-$$\text{IPC}_{\text{Year N}} = \left( \frac{\text{Cost of Basket in Year N}}{\text{Cost of Basket in Base Year}} \right) \times 100$$
-
-### 3. Calculating Inflation Rate (Annual Change)
-$$\text{Inflation Rate} (\%) = \left[ \frac{\text{IPC}_{\text{Current Year}} - \text{IPC}_{\text{Previous Year}}}{\text{IPC}_{\text{Previous Year}}} \right] \times 100$$
-
-### 4. Calculating Average Annual Inflation Rate (Multi-Year)
-$$\text{Average Annual Rate} (\%) = \left[ \left( \frac{\text{IPC}_{\text{End}}}{\text{IPC}_{\text{Start}}} \right)^{\frac{1}{n}} - 1 \right] \times 100$$
-*(Where $n$ is the number of years/periods.)*
-
-### 5. Converting Prices (Real Terms)
-**A. Price from Year A to Year B:**
-$$\text{Price}_{\text{Year A in Dollars of Year B}} = \text{Price}_{\text{Year A}} \times \left( \frac{\text{IPC}_{\text{Year B}}}{\text{IPC}_{\text{Year A}}} \right)$$
-
-**B. Price from Year B to Year A:**
-$$\text{Price}_{\text{Year B in Dollars of Year A}} = \text{Price}_{\text{Year B}} \times \left( \frac{\text{IPC}_{\text{Year A}}}{\text{IPC}_{\text{Year B}}} \right)$$
+1.  **Quantity Calculation:** $\text{Quantité} = \text{Dépense totale} / \text{Prix unitaire}$ (Used to determine the fixed basket quantities based on 2010 spending).
+2.  **IPC Calculation (General):** $\text{IPC}_{\text{Year X}} = (\text{Coût du panier en Year X} / \text{Coût du panier en Base Year}) \times 100$.
+3.  **Inflation Rate (Two Years):** $\text{Taux d'inflation} = [(\text{IPC}_{\text{Final}} - \text{IPC}_{\text{Initial}}) / \text{IPC}_{\text{Initial}}] \times 100$.
+4.  **Average Annual Inflation Rate (Compound Growth):** $\text{Taux annuel moyen} = [(\text{IPC}_{\text{Final}} / \text{IPC}_{\text{Initial}})^{1/n} - 1] \times 100$, where $n$ is the number of years between periods.
+5.  **Price Conversion (Year A to Year B):** $\text{Prix}_{\text{Year A en dollars de Year B}} = \text{Prix}_{\text{Year A}} \times (\text{IPC}_{\text{Year B}} / \text{IPC}_{\text{Year A}})$.
 
 ## Step-by-Step Procedures
 
-**A. Establishing the Basket (2010):**
-1.  Determine the total expenditure for each good in the base year (2010).
-2.  Calculate the required quantity of each good using the formula: Quantity = Total Expenditure / Unit Price.
-    *   *(Example: Juice: $60 / $4 = 15 bottles; Tissu: $40 / $10 = 4 meters).*
-
-**B. Calculating IPC for a New Year (e.g., 2011):**
-1.  Use the *fixed quantities* established in the base year basket.
-2.  Calculate the total cost of this fixed basket using the prices from the new year (2011).
-3.  Apply the IPC formula: $(\text{New Cost} / \text{Base Year Cost}) \times 100$.
-
-**C. Calculating Average Annual Inflation:**
-1.  Determine the starting and ending IPC values ($\text{IPC}_{\text{Start}}$ and $\text{IPC}_{\text{End}}$).
-2.  Count the number of annual periods ($n$).
-3.  Apply the geometric mean formula (Formula 4) to find the average rate.
-
-**D. Comparing Real Prices:**
-1.  To see how much a price from an earlier year ($\text{Year A}$) costs in later money ($\text{Year B}$), use Formula 5A.
-2.  To see how much a price from a later year ($\text{Year B}$) cost in earlier money ($\text{Year A}$), use Formula 5B.
+1.  **Determine Basket:** Calculate the fixed quantities of goods using 2010 spending data (e.g., Juice: $60 / \$4 = 15$ bottles; Fabric: $40 / \$10 = 4$ meters).
+2.  **Calculate Costs:** Determine the cost of this fixed basket in subsequent years (e.g., 2011 cost = $(15 \times \$5) + (4 \times \$11)$).
+3.  **Calculate IPC:** Use the base year's cost as the denominator to find the index for other years.
+4.  **Calculate Inflation Rate:** Apply the relative change formula between consecutive or distant years.
+5.  **Convert Prices:** Use the ratio of two IPC values to convert a price from one year's currency/value into another year's equivalent value (e.g., 2011 price expressed in 2018 dollars).
 
 ## Worked Examples from the Source
 
-**1. IPC Calculation (2010 to 2011):**
-*   **Basket:** 15 bottles of juice and 4 meters of fabric (fixed quantities).
-*   **Cost in 2010:** $(15 \times \$4) + (4 \times \$10) = \$100$. ($\text{IPC}_{2010} = 100$).
-*   **Cost in 2011:** $(15 \times \$5) + (4 \times \$11) = \$75 + \$44 = \$119$.
-*   **$\text{IPC}_{2011}$:** $(\$119 / \$100) \times 100 = 119$.
-
-**2. Inflation Rate (2010 to 2011):**
-$$\text{Inflation} (\%) = [(119 - 100) / 100] \times 100 = 19\%$$
-
-**3. Average Annual Inflation (2011 to 2018):**
-*   $\text{IPC}_{2011} = 119$. $\text{IPC}_{2018} = 210$ (calculated using the fixed basket: $(15 \times \$10) + (4 \times \$15) = \$210$).
-*   Number of periods ($n$) = 7 years.
-$$\text{Average Annual Rate} (\%) = [(210 / 119)^{(1/7)} - 1] \times 100 \approx 8.45\%$$
-
-**4. Price Conversion (Juice, 2011 to 2018):**
-*   Price in 2011: \$5. $\text{IPC}_{2018} = 210$. $\text{IPC}_{2011} = 119$.
-$$\text{Real Price} = \$5 \times (210 / 119) \approx \$8.82$$
-
-**5. Real Cost Comparison:**
-*   The price of juice in 2018 (\$10) is higher than the equivalent real cost of the 2011 purchase (\$8.82), indicating that the item became more expensive in real terms.
+*   **Basket Composition (2010):** 15 bottles of juice and 4 meters of fabric.
+*   **IPC Calculation:** IPC 2010 = 100; IPC 2011 = 119.
+*   **Inflation Rate (2010-2011):** $19\%$.
+*   **Average Annual Inflation Rate (2011-2018):** Approximately $8.45\%$ (calculated over 7 variations).
+*   **Price Conversion Example:** A juice bottle costing \$5 in 2011 is equivalent to approximately \$8.82 in 2018 dollars.
 
 ## New Practice Examples
 
@@ -332,19 +313,38 @@ Not verified in this chunk.
 
 ## Common Mistakes / Traps
 
-*   **Using Nominal vs. Real Prices:** Failing to convert prices across years leads to incorrect conclusions about purchasing power. Always remember to index prices using the IPC ratio when comparing different time periods.
-*   **Simple Average Inflation:** When calculating average annual inflation over multiple years (e.g., 2011–2018), one must use the geometric mean formula, not simply averaging the yearly percentage changes.
-*   **Changing the Basket:** The most critical error is changing the quantities of goods in the basket for different years. The IPC calculation *requires* that the consumption basket remains fixed (based on base year quantities).
+*   Confusing the calculation of inflation rate (which uses IPC ratios) with simple percentage change when compounding effects are present (e.g., using simple addition instead of geometric means for multi-year averages).
+*   Forgetting to use the *fixed basket* quantities derived from the base year when calculating costs in later years.
 
 ## Things to Memorize
 
-1.  The formula for calculating average annual inflation using the geometric mean: $\left[ (\text{IPC}_{\text{End}} / \text{IPC}_{\text{Start}})^{1/n} - 1 \right] \times 100$.
-2.  The principle that the consumption basket quantities must remain constant across all years analyzed.
+*   Base Year IPC = 100.
+*   The formula for average annual inflation rate: $[(\text{IPC}_{\text{Final}} / \text{IPC}_{\text{Initial}})^{1/n} - 1] \times 100$.
 
 ## Things to Understand Deeply
 
-*   **Inflation is a Relative Concept:** Inflation does not mean prices are *always* going up; it means they are rising relative to the base year, eroding purchasing power.
-*   **Real Cost vs. Nominal Price:** A high nominal price in Year B might represent a low real
+The core concept is that the IPC measures changes in *purchasing power* relative to a fixed standard of living (the basket). When comparing prices, you must adjust for inflation; otherwise, you are comparing nominal values, not real costs.
+
+## Flashcards
+
+**Front:** How do you calculate the quantity of goods needed for an IPC calculation?
+**Back:** Quantity = Total Expenditure / Unit Price (using base year spending data).
+
+**Front:** What does a higher IPC value indicate?
+**Back:** A higher cost of living or inflation has occurred since the base year.
+
+## Practice Questions
+
+Not verified in this chunk.
+
+## Uncertain Claims
+
+The calculation for the "Salaire moyen hebdomadaire indexe au cout de la vie pour 2019" is mentioned as a topic but no data or procedure is provided to calculate it, so its outcome is uncertain based on this chunk alone.
+
+## Source References
+
+*   Ville-maigre : panier, IPC, inflation et pouvoir d’achat Situation de depart (Source ID: SRC-0001)
+*   ECA1010 - Theme 2 : Le cout de la vie Guide de cheminement detaille - IPC, inflation, valeurs reelles et interets reels (Source ID: SRC-0001)
 
 ---
 

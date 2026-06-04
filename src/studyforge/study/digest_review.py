@@ -13,6 +13,10 @@ from studyforge.core.chunking_jobs import get_chunk_manifest_path
 from studyforge.core.digest_jobs import get_local_digest_dir
 from studyforge.core.extraction_jobs import SourceNotFoundError, find_source_by_id
 from studyforge.core.sources import load_source_registry, resolve_course_path
+from studyforge.study.digest_sections import (
+    DEFAULT_REQUIRED_SECTIONS,
+    check_required_sections,
+)
 
 # Expected placeholder when a section has no chunk support (not counted as uncertainty)
 _EXPECTED_PLACEHOLDER_PHRASE = "not verified in this chunk"
@@ -24,17 +28,6 @@ _UNCERTAINTY_PHRASES = [
     "missing source",
     "source does not say",
     "cannot determine",
-]
-
-DEFAULT_REQUIRED_SECTIONS = [
-    "Big Picture",
-    "Key Ideas",
-    "Definitions",
-    "Formulas / Rules / Methods",
-    "Worked Examples from the Source",
-    "Practice Questions",
-    "Uncertain Claims",
-    "Source References",
 ]
 
 # Per-file and overall thresholds
@@ -66,43 +59,6 @@ def _word_count(text: str) -> int:
     if not stripped:
         return 0
     return len(stripped.split())
-
-
-def check_required_sections(
-    text: str, required_sections: list[str] | None = None
-) -> dict:
-    """
-    Check which required Markdown sections appear in ``text``.
-
-    Looks for headings like ``## Big Picture`` or ``# Big Picture``.
-
-    Returns:
-        {
-            "required_sections": [...],
-            "present": [...],
-            "missing": [...],
-        }
-    """
-    sections = required_sections or DEFAULT_REQUIRED_SECTIONS
-    present: list[str] = []
-    missing: list[str] = []
-
-    for section in sections:
-        # Match ## Section or # Section (allow flexible spacing)
-        pattern = re.compile(
-            rf"^#{{1,2}}\s+{re.escape(section)}\s*$",
-            re.MULTILINE | re.IGNORECASE,
-        )
-        if pattern.search(text):
-            present.append(section)
-        else:
-            missing.append(section)
-
-    return {
-        "required_sections": list(sections),
-        "present": present,
-        "missing": missing,
-    }
 
 
 def review_digest_file(path: Path, min_words: int = 200) -> dict:

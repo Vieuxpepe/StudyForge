@@ -16,12 +16,12 @@ if str(_SRC) not in sys.path:
 from studyforge.core.digest_jobs import (  # noqa: E402
     DEFAULT_DIGEST_MAX_TOKENS,
     DigestOutputExistsError,
-    digest_has_required_sections,
     get_local_digest_dir,
     get_local_digest_log_path,
     run_local_digest_for_source,
 )
 from studyforge.core.sources import load_source_registry  # noqa: E402
+from studyforge.study.digest_sections import digest_has_required_sections  # noqa: E402
 from studyforge.llm.digest_prompts import build_local_digest_messages  # noqa: E402
 
 CHUNK_MD = """# Source Chunk

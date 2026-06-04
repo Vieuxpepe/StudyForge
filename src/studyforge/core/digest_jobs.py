@@ -16,7 +16,10 @@ from studyforge.core.sources import (
     save_source_registry,
 )
 from studyforge.llm.digest_prompts import build_local_digest_messages
-from studyforge.study.digest_review import check_required_sections
+from studyforge.study.digest_sections import (
+    check_required_sections,
+    digest_has_required_sections,
+)
 from studyforge.llm.lm_studio_client import (
     DEFAULT_BASE_URL,
     LMStudioAPIError,
@@ -115,11 +118,6 @@ def _clear_digest_outputs(digest_dir: Path) -> None:
     for path in digest_dir.iterdir():
         if path.is_file() and path.suffix.lower() == ".md":
             path.unlink()
-
-
-def digest_has_required_sections(text: str) -> bool:
-    """True when all required ## sections appear in a chunk digest."""
-    return not check_required_sections(text)["missing"]
 
 
 def _read_chunk_digest_text(path: Path) -> str:
