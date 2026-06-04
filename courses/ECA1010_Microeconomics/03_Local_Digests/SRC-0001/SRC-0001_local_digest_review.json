@@ -6,40 +6,30 @@
   "chunk_count_expected": 10,
   "chunk_count_found": 10,
   "failed_chunks_from_log": 0,
-  "digests_ok": 3,
-  "digests_needing_review": 7,
+  "digests_ok": 8,
+  "digests_needing_review": 2,
   "digests_failed": 0,
-  "total_uncertainty_markers": 82,
+  "total_uncertainty_markers": 30,
   "overall_status": "needs_review",
   "warnings": [
-    "Missing required sections: Practice Questions, Uncertain Claims, Source References",
     "High uncertainty marker count (5).",
-    "High uncertainty marker count (7).",
-    "High uncertainty marker count (8).",
-    "High uncertainty marker count (6).",
-    "High uncertainty marker count (41)."
+    "High uncertainty marker count (30)."
   ],
   "files": [
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0001_digest.md",
       "exists": true,
-      "word_count": 1098,
-      "uncertainty_markers": 0,
-      "missing_sections": [
-        "Practice Questions",
-        "Uncertain Claims",
-        "Source References"
-      ],
-      "warnings": [
-        "Missing required sections: Practice Questions, Uncertain Claims, Source References"
-      ],
-      "status": "needs_review"
+      "word_count": 1263,
+      "uncertainty_markers": 2,
+      "missing_sections": [],
+      "warnings": [],
+      "status": "ok"
     },
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0002_digest.md",
       "exists": true,
       "word_count": 1215,
-      "uncertainty_markers": 2,
+      "uncertainty_markers": 1,
       "missing_sections": [],
       "warnings": [],
       "status": "ok"
@@ -47,23 +37,17 @@
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0003_digest.md",
       "exists": true,
-      "word_count": 1069,
-      "uncertainty_markers": 1,
-      "missing_sections": [
-        "Practice Questions",
-        "Uncertain Claims",
-        "Source References"
-      ],
-      "warnings": [
-        "Missing required sections: Practice Questions, Uncertain Claims, Source References"
-      ],
-      "status": "needs_review"
+      "word_count": 890,
+      "uncertainty_markers": 3,
+      "missing_sections": [],
+      "warnings": [],
+      "status": "ok"
     },
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0004_digest.md",
       "exists": true,
       "word_count": 1108,
-      "uncertainty_markers": 3,
+      "uncertainty_markers": 2,
       "missing_sections": [],
       "warnings": [],
       "status": "ok"
@@ -83,7 +67,7 @@
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0006_digest.md",
       "exists": true,
       "word_count": 1127,
-      "uncertainty_markers": 2,
+      "uncertainty_markers": 1,
       "missing_sections": [],
       "warnings": [],
       "status": "ok"
@@ -92,32 +76,28 @@
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0007_digest.md",
       "exists": true,
       "word_count": 1214,
-      "uncertainty_markers": 7,
+      "uncertainty_markers": 4,
       "missing_sections": [],
-      "warnings": [
-        "High uncertainty marker count (7)."
-      ],
-      "status": "needs_review"
+      "warnings": [],
+      "status": "ok"
     },
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0008_digest.md",
       "exists": true,
       "word_count": 1074,
-      "uncertainty_markers": 7,
+      "uncertainty_markers": 4,
       "missing_sections": [],
-      "warnings": [
-        "High uncertainty marker count (7)."
-      ],
-      "status": "needs_review"
+      "warnings": [],
+      "status": "ok"
     },
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0009_digest.md",
       "exists": true,
       "word_count": 1253,
-      "uncertainty_markers": 8,
+      "uncertainty_markers": 5,
       "missing_sections": [],
       "warnings": [
-        "High uncertainty marker count (8)."
+        "High uncertainty marker count (5)."
       ],
       "status": "needs_review"
     },
@@ -125,25 +105,23 @@
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001-CHUNK-0010_digest.md",
       "exists": true,
       "word_count": 978,
-      "uncertainty_markers": 6,
+      "uncertainty_markers": 3,
       "missing_sections": [],
-      "warnings": [
-        "High uncertainty marker count (6)."
-      ],
-      "status": "needs_review"
+      "warnings": [],
+      "status": "ok"
     },
     {
       "path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001_combined_local_digest.md",
       "exists": true,
-      "word_count": 11175,
-      "uncertainty_markers": 41,
+      "word_count": 11161,
+      "uncertainty_markers": 30,
       "missing_sections": [],
       "warnings": [
-        "High uncertainty marker count (41)."
+        "High uncertainty marker count (30)."
       ],
       "status": "needs_review"
     }
   ],
-  "date_reviewed": "2026-06-04T03:09:49-04:00",
+  "date_reviewed": "2026-06-04T03:21:16-04:00",
   "min_words_threshold": 200
 }

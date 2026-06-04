@@ -2,6 +2,7 @@
 pymupdf
 requests
 streamlit
+python-dotenv
 
 # Future (not required yet):
 # httpx

@@ -6,5 +6,6 @@
   "default_course_template": "_Course_Template",
   "local_first": true,
   "use_sqlite_later": true,
-  "use_vector_store_later": true
+  "use_vector_store_later": true,
+  "google_audit_model": "gemma-4-26b-a4b-it"
 }

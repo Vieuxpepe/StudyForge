@@ -9,7 +9,7 @@
       "file_name": "tmpwgbb_y1k.pdf",
       "file_extension": ".pdf",
       "date_added": "2026-06-04T02:24:40-04:00",
-      "status": "local_digest_complete",
+      "status": "intermediate_audit_imported",
       "extracted_text_path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\02_Extracted_Text\\extracted_sources\\SRC-0001_extracted_text.md",
       "extraction_log_path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\02_Extracted_Text\\extraction_logs\\SRC-0001_extraction_log.json",
       "date_extracted": "2026-06-04T02:25:17-04:00",
@@ -19,7 +19,10 @@
       "local_digest_path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\03_Local_Digests\\SRC-0001\\SRC-0001_combined_local_digest.md",
       "local_digest_log_path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\08_App_Data\\job_logs\\SRC-0001_local_digest_log.json",
       "date_local_digest": "2026-06-04T03:18:51-04:00",
-      "local_digest_model": "google/gemma-4-e4b"
+      "local_digest_model": "google/gemma-4-e4b",
+      "latest_intermediate_audit_path": "C:\\StudyForge\\courses\\ECA1010_Microeconomics\\04_Intermediate_Audits\\SRC-0001\\SRC-0001_intermediate_audit_v002.md",
+      "latest_intermediate_audit_id": "IA-SRC-0001-V002",
+      "date_intermediate_audit_imported": "2026-06-04T03:55:47-04:00"
     }
   ]
 }

@@ -299,26 +299,22 @@ def _build_packet_markdown(
     return "\n".join(lines)
 
 
-def build_intermediate_audit_packet(
+def collect_intermediate_audit_items(
     course_name: str,
     source_id: str,
     limit_chunks: int | None = None,
     only_needs_review: bool = False,
-    overwrite: bool = False,
     root: Path | None = None,
-) -> dict:
+) -> tuple[list[dict], list[str]]:
     """
-    Build and save an intermediate audit packet for manual cloud audit.
-
-    Does not modify source_registry.json or call any AI API.
+    Load source chunks and local digests selected for intermediate audit.
 
     Returns:
-        Summary dict including packet paths and selected chunk IDs.
+        (audit_items, warnings) — each item has chunk_id, source/digest text, paths.
     """
     course_path = resolve_course_path(course_name, root)
     entry = find_source_by_id(course_name, source_id, root)
     normalized_id = _normalize_source_id(entry["id"])
-    title = entry.get("title", normalized_id)
 
     status = entry.get("status", "")
     combined_path = Path(entry.get("local_digest_path", ""))
@@ -344,28 +340,14 @@ def build_intermediate_audit_packet(
     )
 
     if not selected_chunks:
-        raise ValueError("No chunks selected for intermediate audit packet.")
-
-    audit_dir = get_intermediate_audit_dir(course_path, normalized_id)
-    md_path, json_path = _packet_paths(audit_dir, normalized_id)
-
-    if not overwrite and (md_path.exists() or json_path.exists()):
-        raise PacketOutputExistsError(
-            "Intermediate audit packet already exists:\n"
-            f"  - {md_path}\n"
-            f"  - {json_path}\n"
-            "Use --overwrite to replace the packet files."
-        )
+        raise ValueError("No chunks selected for intermediate audit.")
 
     digest_dir = get_local_digest_dir(course_path, normalized_id)
     warnings: list[str] = []
     audit_items: list[dict] = []
-    selected_ids: list[str] = []
 
     for chunk in selected_chunks:
         chunk_id = str(chunk.get("chunk_id", ""))
-        selected_ids.append(chunk_id)
-
         source_path = Path(chunk.get("file_path", ""))
         digest_path = digest_dir / f"{chunk_id}_digest.md"
 
@@ -397,6 +379,56 @@ def build_intermediate_audit_packet(
 
     if not digest_review:
         warnings.append("No rule-based local digest review JSON found.")
+
+    return audit_items, warnings
+
+
+def build_intermediate_audit_packet(
+    course_name: str,
+    source_id: str,
+    limit_chunks: int | None = None,
+    only_needs_review: bool = False,
+    overwrite: bool = False,
+    root: Path | None = None,
+) -> dict:
+    """
+    Build and save an intermediate audit packet for manual cloud audit.
+
+    Does not modify source_registry.json or call any AI API.
+
+    Returns:
+        Summary dict including packet paths and selected chunk IDs.
+    """
+    course_path = resolve_course_path(course_name, root)
+    entry = find_source_by_id(course_name, source_id, root)
+    normalized_id = _normalize_source_id(entry["id"])
+    title = entry.get("title", normalized_id)
+
+    manifest_path = get_chunk_manifest_path(course_path, normalized_id)
+    chunk_manifest = load_json(manifest_path)
+    review_path = _digest_review_path(course_path, normalized_id)
+    digest_review = load_json(review_path) if review_path.is_file() else None
+
+    audit_items, warnings = collect_intermediate_audit_items(
+        course_name,
+        source_id,
+        limit_chunks=limit_chunks,
+        only_needs_review=only_needs_review,
+        root=root,
+    )
+
+    audit_dir = get_intermediate_audit_dir(course_path, normalized_id)
+    md_path, json_path = _packet_paths(audit_dir, normalized_id)
+
+    if not overwrite and (md_path.exists() or json_path.exists()):
+        raise PacketOutputExistsError(
+            "Intermediate audit packet already exists:\n"
+            f"  - {md_path}\n"
+            f"  - {json_path}\n"
+            "Use --overwrite to replace the packet files."
+        )
+
+    selected_ids = [item["chunk_id"] for item in audit_items]
 
     generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 

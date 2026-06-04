@@ -20,8 +20,14 @@ from studyforge.core.digest_jobs import (
     run_local_digest_for_source,
 )
 from studyforge.core.extraction_jobs import extract_registered_source
+from studyforge.core.intermediate_audit_jobs import run_intermediate_audit_for_source
 from studyforge.core.paths import find_project_root, get_courses_dir, load_config
+from studyforge.core.secrets import get_google_api_key, set_google_api_key
 from studyforge.core.sources import add_source, list_sources, resolve_course_path
+from studyforge.llm.google_genai_client import (
+    DEFAULT_GEMMA_4_26B_MODEL,
+    DEFAULT_GEMMA_4_31B_MODEL,
+)
 from studyforge.llm.lm_studio_client import (
     DEFAULT_BASE_URL,
     check_lm_studio_connection,
@@ -51,6 +57,7 @@ def _init_session_state() -> None:
         "overlap_words": 150,
         "overwrite": False,
         "max_digest_tokens": DEFAULT_DIGEST_MAX_TOKENS,
+        "google_audit_model": DEFAULT_GEMMA_4_26B_MODEL,
         "limit_chunks": 0,
         "only_needs_review": False,
         "selected_course": None,
@@ -421,7 +428,44 @@ def page_audits(course_name: str | None) -> None:
     )
 
     st.subheader("Intermediate audit")
-    if st.button("Export intermediate audit packet"):
+
+    st.caption(
+        "Automated: calls Google AI (Gemma 4) per chunk and saves a versioned audit. "
+        "Export packet is optional (manual copy/paste into AI Studio)."
+    )
+    model_options = [DEFAULT_GEMMA_4_26B_MODEL, DEFAULT_GEMMA_4_31B_MODEL]
+    if st.session_state.google_audit_model not in model_options:
+        model_options.insert(0, st.session_state.google_audit_model)
+    st.session_state.google_audit_model = st.selectbox(
+        "Google AI model",
+        model_options,
+        index=model_options.index(st.session_state.google_audit_model)
+        if st.session_state.google_audit_model in model_options
+        else 0,
+    )
+
+    if st.button("Run intermediate audit (Google AI)"):
+        if not get_google_api_key():
+            st.error(
+                "Google API key not set. Add it on the Settings page or set "
+                "GOOGLE_API_KEY in your environment."
+            )
+        else:
+            try:
+                with st.spinner("Running intermediate audit (one API call per chunk)…"):
+                    summary = run_intermediate_audit_for_source(
+                        course_name,
+                        source_id,
+                        model=st.session_state.google_audit_model,
+                        limit_chunks=limit,
+                        only_needs_review=st.session_state.only_needs_review,
+                    )
+                _show_result_summary("Intermediate audit imported", summary)
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+
+    if st.button("Export intermediate audit packet (manual)"):
         try:
             summary = build_intermediate_audit_packet(
                 course_name,
@@ -575,9 +619,31 @@ def page_settings() -> None:
     st.write(f"**Project root:** `{root}`")
     st.write(f"**Courses directory:** `{courses_dir}`")
     st.write(f"**Default LM Studio URL:** `{DEFAULT_BASE_URL}`")
+    st.subheader("Google AI (intermediate audit)")
+    has_key = bool(get_google_api_key(root))
+    st.write(
+        "API key status:",
+        "configured" if has_key else "not set",
+    )
+    st.caption(
+        "Preferred: gitignored `.env` with `GOOGLE_API_KEY=...` (see `.env.example`). "
+        "Also: Windows user env var, `config/local_secrets.json`, or Save below."
+    )
+    new_key = st.text_input(
+        "Google AI API key",
+        type="password",
+        placeholder="Paste key from aistudio.google.com/apikey",
+        key="google_api_key_input",
+    )
+    if st.button("Save Google API key locally"):
+        if not new_key.strip():
+            st.error("Enter an API key first.")
+        else:
+            path = set_google_api_key(new_key.strip(), root)
+            st.success(f"Saved to `{path}` (gitignored). Restart not required.")
     st.info(
-        "Settings are session-based for now (LM URL on Pipeline page). "
-        "Config file: `config/studyforge_config.json`."
+        "LM Studio URL is on the Pipeline page. "
+        "General config: `config/studyforge_config.json`."
     )
 
 
