@@ -44,6 +44,7 @@ python scripts/launch_gui.py
 4. **Audits** — export/import intermediate and final audits; **Final Audit Normalizer** maps messy headings to the study-pack template (or export a manual repair packet).
 5. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
 6. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
+7. **Study Session** — guided session through today's priorities (recall, mistakes, weak points) in one page; self-graded only.
 7. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
 
 The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
@@ -123,6 +124,12 @@ Review session plan (deterministic daily priorities from mistakes, weak points, 
 python scripts/review_plan.py --course ECA1010_Microeconomics
 python scripts/review_plan.py --course ECA1010_Microeconomics --limit 5 --overwrite
 python scripts/review_plan.py --course ECA1010_Microeconomics --date 2026-06-04
+
+python scripts/study_session.py --course ECA1010_Microeconomics --start --limit 10
+python scripts/study_session.py --course ECA1010_Microeconomics --latest
+python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --complete-item SESSION-ITEM-0001 --result partial --notes "Still confused"
+python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --finish
+python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --export
 ```
 
 Guided Workflow (one step per click; uses Pipeline Doctor `next_action`):

@@ -43,6 +43,9 @@ Work through one source end-to-end on your machine.
 - [ ] Confirm `07_My_Work/mistakes_log.json` and `weak_points.json` exist
 - [ ] Generate today's review plan on **Review Tracker**
 - [ ] Open `07_My_Work/review_sessions/YYYY-MM-DD_review_plan.md`
+- [ ] Start a **Study Session** on the Study Session page (or `study_session.py --start`)
+- [ ] Complete at least one session item (recall, mistake, or weak point)
+- [ ] Finish session and export summary under `07_My_Work/study_sessions/`
 - [ ] Confirm priorities match your open mistakes / weak points / recall gaps
 
 ## Pass criteria
@@ -64,7 +67,8 @@ Work through one source end-to-end on your machine.
 | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
 | Intermediate/final audits, normalizer | **Audits** |
 | Active recall practice | **Active Recall** |
-| Mistakes / weak points | **Review Tracker** |
+| Mistakes / weak points / review plan | **Review Tracker** |
+| Guided study session | **Study Session** |
 | LM Studio URL / tokens | **Pipeline** |
 | Google API key | **Settings** |
 

@@ -25,3 +25,4 @@ Utility and setup scripts.
 - `mistakes.py` — course mistakes log (`--list`, `--add`, `--update-status`, `--export`); files `07_My_Work/mistakes_log.json` / `mistakes_log.md`
 - `weak_points.py` — weak points tracker (`--list`, `--add`, `--update`, `--export`); files `07_My_Work/weak_points.json` / `weak_points.md`; GUI **Review Tracker** page
 - `review_plan.py` — generate daily review plan Markdown + JSON (`--course`, optional `--date`, `--limit`, `--overwrite`); output under `07_My_Work/review_sessions/`; GUI **Review Tracker** → **Review Session Planner**
+- `study_session.py` — guided study session from review priorities (`--course`, `--start`, `--latest`, `--session-id`, `--complete-item`, `--result`, `--finish`, `--export`); logs under `07_My_Work/study_sessions/`; GUI **Study Session**

@@ -79,6 +79,15 @@ from studyforge.study.review_planner import (
     generate_review_plan,
     get_review_plan_path,
 )
+from studyforge.study.study_session import (
+    InvalidSessionResultError,
+    StudySessionItemNotFoundError,
+    complete_study_session,
+    export_study_session_summary,
+    get_latest_study_session,
+    record_session_item_result,
+    start_study_session,
+)
 from studyforge.study.weak_points import (
     InvalidConfidenceError,
     InvalidWeakPointStatusError,
@@ -98,6 +107,7 @@ NAV_PAGES = [
     "Audits",
     "Active Recall",
     "Review Tracker",
+    "Study Session",
     "Settings",
 ]
 
@@ -1468,6 +1478,228 @@ def page_review_tracker(course_name: str | None) -> None:
             _show_exception(exc)
 
 
+def page_study_session(course_name: str | None) -> None:
+    st.header("Study Session")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Work through today's review priorities in one place: active recall, "
+        "mistakes, and weak points. Self-graded only (no AI)."
+    )
+
+    session_key = f"study_session_{course_name}"
+    limit = st.number_input("Item limit", min_value=1, max_value=30, value=10, step=1)
+
+    if st.button("Start new session", key=f"ss_start_{course_name}"):
+        try:
+            summary = start_study_session(course_name, limit=int(limit))
+            session = get_latest_study_session(course_name)
+            st.session_state[session_key] = session
+            st.success(f"Started `{summary['session_id']}` with {summary['item_count']} items.")
+            st.rerun()
+        except Exception as exc:
+            _show_exception(exc)
+
+    session = st.session_state.get(session_key)
+    if session is None:
+        session = get_latest_study_session(course_name)
+        if session:
+            st.session_state[session_key] = session
+
+    if not session:
+        st.info("No study session yet. Click **Start new session** when you have open mistakes, weak points, or recall gaps.")
+        return
+
+    session_id = session.get("session_id", "")
+    items = session.get("items", [])
+    completed = session.get("completed_items", [])
+    completed_ids = {c.get("session_item_id") for c in completed}
+
+    st.subheader("Current session")
+    st.write(f"**ID:** `{session_id}` — **Status:** {session.get('status', '')}")
+    st.progress(
+        len(completed_ids) / len(items) if items else 0.0,
+        text=f"{len(completed_ids)} / {len(items)} items completed",
+    )
+
+    if not items:
+        st.warning("This session has no priority items. Add mistakes, weak points, or practice active recall first.")
+        col_f, col_e = st.columns(2)
+        with col_f:
+            if st.button("Finish session", key=f"ss_finish_empty_{course_name}"):
+                complete_study_session(course_name, session_id)
+                st.session_state[session_key] = get_latest_study_session(course_name)
+                st.rerun()
+        with col_e:
+            if st.button("Export summary", key=f"ss_export_empty_{course_name}"):
+                path = export_study_session_summary(course_name, session_id)
+                st.success(f"Summary: `{path}`")
+        return
+
+    labels = []
+    for item in items:
+        done = "done" if item["session_item_id"] in completed_ids else "todo"
+        labels.append(
+            f"[{done}] {item['session_item_id']} ({item['type']}) — {item['title'][:50]}"
+        )
+    chosen = st.selectbox("Session item", labels, key=f"ss_item_{course_name}_{session_id}")
+    chosen_index = labels.index(chosen)
+    current = items[chosen_index]
+    payload = current.get("payload", {})
+
+    st.markdown(f"**Priority:** {current.get('priority_reason', '')}")
+    if current.get("details"):
+        st.caption(current["details"])
+
+    item_type = current.get("type", "")
+    result_options: list[str]
+
+    if item_type == "active_recall":
+        st.subheader("Active recall")
+        st.write(payload.get("question", current.get("title", "")))
+        st.caption(f"Question ID: `{payload.get('question_id', '')}`")
+        if payload.get("grade"):
+            st.caption(f"Last grade: {payload.get('grade')}")
+        user_answer = st.text_area("Your answer", height=100, key=f"ss_ar_ans_{session_id}_{current['session_item_id']}")
+        grade = st.selectbox(
+            "Grade",
+            ["correct", "partial", "wrong", "skipped"],
+            key=f"ss_ar_grade_{session_id}_{current['session_item_id']}",
+        )
+        notes = st.text_input("Notes", key=f"ss_ar_notes_{session_id}_{current['session_item_id']}")
+        create_mistake = st.checkbox("Create mistake", key=f"ss_ar_mist_{current['session_item_id']}")
+        create_weak = st.checkbox("Create weak point", key=f"ss_ar_weak_{current['session_item_id']}")
+        weak_concept = st.text_input(
+            "Weak point concept (optional)",
+            key=f"ss_ar_wc_{current['session_item_id']}",
+        )
+        def _save_recall() -> None:
+            record_session_item_result(
+                course_name,
+                session_id,
+                current["session_item_id"],
+                grade,
+                notes=notes or None,
+                user_answer=user_answer,
+                create_mistake=create_mistake,
+                create_weak_point=create_weak,
+                weak_point_concept=weak_concept or None,
+            )
+
+    elif item_type == "mistake":
+        st.subheader("Mistake review")
+        st.write("**Question:**", payload.get("question", ""))
+        st.write("**Your answer:**", payload.get("user_answer", ""))
+        if payload.get("why_wrong"):
+            st.write("**Why wrong:**", payload["why_wrong"])
+        if payload.get("how_to_avoid"):
+            st.write("**How to avoid:**", payload["how_to_avoid"])
+        if payload.get("correct_explanation"):
+            st.write("**Correct explanation:**", payload["correct_explanation"])
+        mist_status_choices = ["reviewed_once", "still_weak", "mastered"]
+        current_mist_status = str(payload.get("status", "new")).lower()
+        mist_index = (
+            mist_status_choices.index(current_mist_status)
+            if current_mist_status in mist_status_choices
+            else 0
+        )
+        status = st.selectbox(
+            "Update status",
+            mist_status_choices,
+            index=mist_index,
+            key=f"ss_mist_st_{current['session_item_id']}",
+        )
+        notes = st.text_input("Notes", key=f"ss_mist_notes_{current['session_item_id']}")
+
+        def _save_recall() -> None:
+            record_session_item_result(
+                course_name,
+                session_id,
+                current["session_item_id"],
+                status,
+                notes=notes or None,
+            )
+
+    elif item_type == "weak_point":
+        st.subheader("Weak point")
+        st.write("**Concept:**", payload.get("concept", current.get("title", "")))
+        if payload.get("why_hard"):
+            st.write("**Why hard:**", payload["why_hard"])
+        if payload.get("what_to_review"):
+            st.write("**What to review:**", payload["what_to_review"])
+        confidence = st.slider(
+            "Confidence (1–5)",
+            1,
+            5,
+            int(payload.get("confidence_level", 3)),
+            key=f"ss_wp_conf_{current['session_item_id']}",
+        )
+        wp_status_choices = ["new", "reviewing", "still_weak", "improving", "mastered"]
+        current_wp_status = str(payload.get("status", "new")).lower()
+        wp_index = (
+            wp_status_choices.index(current_wp_status)
+            if current_wp_status in wp_status_choices
+            else 0
+        )
+        wp_status = st.selectbox(
+            "Status",
+            wp_status_choices,
+            index=wp_index,
+            key=f"ss_wp_st_{current['session_item_id']}",
+        )
+        notes = st.text_input("Notes", key=f"ss_wp_notes_{current['session_item_id']}")
+
+        def _save_recall() -> None:
+            record_session_item_result(
+                course_name,
+                session_id,
+                current["session_item_id"],
+                wp_status,
+                notes=notes or None,
+                confidence_level=confidence,
+            )
+    else:
+        st.warning(f"Unknown item type: {item_type}")
+
+        def _save_recall() -> None:
+            record_session_item_result(
+                course_name,
+                session_id,
+                current["session_item_id"],
+                "completed",
+            )
+
+    ncol1, ncol2, ncol3 = st.columns(3)
+    with ncol1:
+        if st.button("Save result", key=f"ss_save_{current['session_item_id']}"):
+            try:
+                _save_recall()
+                st.session_state[session_key] = get_latest_study_session(course_name)
+                st.success("Saved.")
+                st.rerun()
+            except (InvalidSessionResultError, StudySessionItemNotFoundError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+    with ncol2:
+        if st.button("Finish session", key=f"ss_finish_{course_name}"):
+            try:
+                complete_study_session(course_name, session_id)
+                st.session_state[session_key] = get_latest_study_session(course_name)
+                st.success("Session marked complete.")
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+    with ncol3:
+        if st.button("Export summary", key=f"ss_export_{course_name}"):
+            try:
+                path = export_study_session_summary(course_name, session_id)
+                st.success(f"Summary: `{path}`")
+            except Exception as exc:
+                _show_exception(exc)
+
+
 def page_settings() -> None:
     st.header("Settings")
     root = Path(st.session_state.project_root)
@@ -1529,6 +1761,8 @@ def run() -> None:
         page_active_recall(course_name)
     elif page == "Review Tracker":
         page_review_tracker(course_name)
+    elif page == "Study Session":
+        page_study_session(course_name)
     elif page == "Settings":
         page_settings()
 
