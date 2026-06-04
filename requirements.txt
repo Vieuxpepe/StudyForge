@@ -1,0 +1,7 @@
+# StudyForge — Python dependencies
+pymupdf
+requests
+streamlit
+
+# Future (not required yet):
+# httpx

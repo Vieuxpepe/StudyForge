@@ -1,0 +1,6 @@
+{
+  "course_slug": "_Course_Template",
+  "chunk_size_tokens": 4000,
+  "enable_intermediate_audit": true,
+  "enable_final_audit": true
+}

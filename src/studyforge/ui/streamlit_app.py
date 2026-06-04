@@ -1,0 +1,609 @@
+"""
+StudyForge Streamlit GUI — wraps existing CLI backend functions.
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import streamlit as st
+
+from studyforge.audits.final_import import import_final_audit
+from studyforge.audits.final_packet import build_final_audit_packet
+from studyforge.audits.intermediate_import import import_intermediate_audit
+from studyforge.audits.intermediate_packet import build_intermediate_audit_packet
+from studyforge.core.chunking_jobs import chunk_registered_source
+from studyforge.core.courses import create_course, list_courses
+from studyforge.core.digest_jobs import (
+    DEFAULT_DIGEST_MAX_TOKENS,
+    run_local_digest_for_source,
+)
+from studyforge.core.extraction_jobs import extract_registered_source
+from studyforge.core.paths import find_project_root, get_courses_dir, load_config
+from studyforge.core.sources import add_source, list_sources, resolve_course_path
+from studyforge.llm.lm_studio_client import (
+    DEFAULT_BASE_URL,
+    check_lm_studio_connection,
+    choose_default_model,
+)
+from studyforge.study.digest_review import review_local_digest_for_source
+from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_no
+
+NAV_PAGES = [
+    "Dashboard",
+    "Courses",
+    "Sources",
+    "Pipeline",
+    "Audits",
+    "Settings",
+]
+
+SOURCE_TYPES = ["textbook", "slides", "homework", "notes", "extra_readings"]
+
+
+def _init_session_state() -> None:
+    defaults = {
+        "project_root": str(find_project_root()),
+        "lm_base_url": DEFAULT_BASE_URL,
+        "lm_model": "",
+        "max_words": 1200,
+        "overlap_words": 150,
+        "overwrite": False,
+        "max_digest_tokens": DEFAULT_DIGEST_MAX_TOKENS,
+        "limit_chunks": 0,
+        "only_needs_review": False,
+        "selected_course": None,
+        "selected_source_id": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _course_names() -> list[str]:
+    return [p.name for p in list_courses()]
+
+
+def _render_sidebar() -> tuple[str, str | None]:
+    st.sidebar.title("StudyForge")
+    st.sidebar.caption("Local-first AI study pipeline")
+
+    courses = _course_names()
+    if courses:
+        index = 0
+        if st.session_state.selected_course in courses:
+            index = courses.index(st.session_state.selected_course)
+        selected = st.sidebar.selectbox("Course", courses, index=index)
+        st.session_state.selected_course = selected
+    else:
+        st.sidebar.info("No courses yet. Create one on the Courses page.")
+        st.session_state.selected_course = None
+
+    page = st.sidebar.radio("Navigation", NAV_PAGES)
+    return page, st.session_state.selected_course
+
+
+def _require_course() -> str | None:
+    if not st.session_state.selected_course:
+        st.warning("Select or create a course in the sidebar.")
+        return None
+    return st.session_state.selected_course
+
+
+def _source_options(course_name: str) -> list[dict]:
+    try:
+        return list_sources(course_name)
+    except Exception as exc:
+        st.error(str(exc))
+        return []
+
+
+def _select_source(sources: list[dict], key: str = "source_picker") -> str | None:
+    if not sources:
+        st.info("No sources for this course. Add one on the Sources page.")
+        return None
+    labels = [
+        f"{s.get('id', '?')} — {s.get('title', 'Untitled')} ({s.get('status', '?')})"
+        for s in sources
+    ]
+    ids = [s.get("id", "") for s in sources]
+    default = 0
+    if st.session_state.selected_source_id in ids:
+        default = ids.index(st.session_state.selected_source_id)
+    choice = st.selectbox("Source", labels, index=default, key=key)
+    idx = labels.index(choice)
+    sid = ids[idx]
+    st.session_state.selected_source_id = sid
+    return sid
+
+
+def _show_exception(exc: Exception) -> None:
+    st.error(f"{type(exc).__name__}: {exc}")
+
+
+def _show_result_summary(title: str, data: dict) -> None:
+    st.success(title)
+    for key, value in data.items():
+        if isinstance(value, list):
+            st.write(f"**{key}:**")
+            for item in value:
+                st.write(f"- {item}")
+        else:
+            st.write(f"**{key}:** {value}")
+
+
+def page_dashboard(course_name: str | None) -> None:
+    st.header("Dashboard")
+    if not course_name:
+        st.write("Create a course to get started.")
+        return
+
+    st.subheader(course_name)
+    try:
+        course_path = resolve_course_path(course_name)
+        sources = list_sources(course_name)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.write(f"**Sources:** {len(sources)}")
+
+    if not sources:
+        st.info("No sources registered yet.")
+        return
+
+    rows = []
+    for entry in sources:
+        flags = source_pipeline_flags(entry)
+        rows.append(
+            {
+                "ID": entry.get("id"),
+                "Title": entry.get("title"),
+                "Type": entry.get("source_type"),
+                "Status": entry.get("status"),
+                "Extracted": yes_no(flags["extracted"]),
+                "Chunked": yes_no(flags["chunked"]),
+                "Local digest": yes_no(flags["local_digest"]),
+                "Intermediate audit": yes_no(flags["intermediate_audit"]),
+                "Final audit": yes_no(flags["final_audit"]),
+            }
+        )
+    st.dataframe(rows, use_container_width=True)
+
+
+def page_courses() -> None:
+    st.header("Courses")
+
+    st.subheader("Existing courses")
+    courses = list_courses()
+    if courses:
+        for path in courses:
+            st.write(f"- `{path.name}` → `{path}`")
+    else:
+        st.write("No courses yet.")
+
+    st.subheader("Create new course")
+    with st.form("create_course_form"):
+        code = st.text_input("Course code", placeholder="ECA1010")
+        name = st.text_input("Course name", placeholder="Microeconomics")
+        submitted = st.form_submit_button("Create course")
+    if submitted:
+        if not code.strip() or not name.strip():
+            st.error("Course code and name are required.")
+        else:
+            try:
+                path = create_course(code.strip(), name.strip())
+                folder = path.name
+                st.session_state.selected_course = folder
+                st.success(f"Course created: {folder}")
+                st.code(str(path))
+            except Exception as exc:
+                _show_exception(exc)
+
+
+def page_sources(course_name: str | None) -> None:
+    st.header("Sources")
+    if not _require_course():
+        return
+
+    st.subheader("Registered sources")
+    sources = _source_options(course_name)
+    if sources:
+        st.dataframe(
+            [
+                {
+                    "id": s.get("id"),
+                    "title": s.get("title"),
+                    "type": s.get("source_type"),
+                    "status": s.get("status"),
+                    "file": s.get("file_name"),
+                }
+                for s in sources
+            ],
+            use_container_width=True,
+        )
+
+    st.subheader("Add source (PDF)")
+    uploaded = st.file_uploader("PDF file", type=["pdf"])
+    source_type = st.selectbox("Source type", SOURCE_TYPES)
+    title = st.text_input("Title (optional)", placeholder="Main Textbook")
+
+    if st.button("Add source", disabled=uploaded is None):
+        if uploaded is None:
+            st.error("Upload a PDF first.")
+            return
+        suffix = Path(uploaded.name).suffix or ".pdf"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded.getvalue())
+            temp_path = Path(tmp.name)
+        try:
+            stored = add_source(
+                course_name=course_name,
+                source_type=source_type,
+                file_path=temp_path,
+                title=title or None,
+            )
+            st.success("Source added.")
+            st.write(f"**Stored at:** `{stored}`")
+            st.rerun()
+        except Exception as exc:
+            _show_exception(exc)
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def page_pipeline(course_name: str | None) -> None:
+    st.header("Pipeline")
+    if not _require_course():
+        return
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="pipeline_source")
+    if not source_id:
+        return
+
+    st.subheader("LM Studio")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.lm_base_url = st.text_input(
+            "LM Studio base URL",
+            value=st.session_state.lm_base_url,
+        )
+    with col2:
+        st.session_state.lm_model = st.text_input(
+            "Model (empty = first from /models)",
+            value=st.session_state.lm_model,
+        )
+    st.session_state.max_digest_tokens = st.number_input(
+        "Max tokens per chunk",
+        min_value=1000,
+        max_value=32000,
+        value=int(st.session_state.max_digest_tokens),
+        step=500,
+        help="Incomplete digests retry with +2000 tokens. Default 6000.",
+    )
+
+    if st.button("Check LM Studio connection"):
+        result = check_lm_studio_connection(st.session_state.lm_base_url)
+        if result["ok"]:
+            st.success(f"Connected — {len(result['models'])} model(s)")
+            for m in result["models"]:
+                st.write(f"- `{m}`")
+            default = choose_default_model(result)
+            if default and not st.session_state.lm_model:
+                st.session_state.lm_model = default
+                st.info(f"Default model set to: {default}")
+        else:
+            st.error(result.get("error") or "Connection failed")
+
+    st.subheader("Chunking options")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.session_state.max_words = st.number_input(
+            "Max words", min_value=100, value=int(st.session_state.max_words)
+        )
+    with c2:
+        st.session_state.overlap_words = st.number_input(
+            "Overlap words", min_value=0, value=int(st.session_state.overlap_words)
+        )
+    with c3:
+        st.session_state.overwrite = st.checkbox(
+            "Overwrite outputs", value=st.session_state.overwrite
+        )
+
+    st.subheader("Run steps")
+
+    if st.button("1. Extract PDF"):
+        try:
+            with st.spinner("Extracting…"):
+                summary = extract_registered_source(
+                    course_name,
+                    source_id,
+                    overwrite=st.session_state.overwrite,
+                )
+            _show_result_summary("Extraction complete", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    if st.button("2. Chunk source"):
+        try:
+            with st.spinner("Chunking…"):
+                summary = chunk_registered_source(
+                    course_name,
+                    source_id,
+                    max_words=int(st.session_state.max_words),
+                    overlap_words=int(st.session_state.overlap_words),
+                    overwrite=st.session_state.overwrite,
+                )
+            _show_result_summary("Chunking complete", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.caption(
+        "After a test run (first chunk only), **Run full local digest** continues "
+        "with the remaining chunks. Use **Overwrite** only to redo all chunks."
+    )
+
+    if st.button("3. Run local digest (first chunk only)"):
+        try:
+            with st.spinner("Running local digest (1 chunk)…"):
+                summary = run_local_digest_for_source(
+                    course_name,
+                    source_id,
+                    base_url=st.session_state.lm_base_url,
+                    model=st.session_state.lm_model or None,
+                    max_tokens=int(st.session_state.max_digest_tokens),
+                    limit_chunks=1,
+                    overwrite=st.session_state.overwrite,
+                )
+            _show_result_summary("Local digest complete", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    if st.button("4. Run full local digest"):
+        try:
+            with st.spinner("Running full local digest…"):
+                summary = run_local_digest_for_source(
+                    course_name,
+                    source_id,
+                    base_url=st.session_state.lm_base_url,
+                    model=st.session_state.lm_model or None,
+                    max_tokens=int(st.session_state.max_digest_tokens),
+                    overwrite=st.session_state.overwrite,
+                )
+            _show_result_summary("Local digest complete", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    if st.button("5. Review local digest"):
+        try:
+            summary = review_local_digest_for_source(course_name, source_id)
+            _show_result_summary("Review complete", summary)
+            st.markdown(f"**Report:** `{summary.get('report_path_md', '')}`")
+        except Exception as exc:
+            _show_exception(exc)
+
+    _render_file_preview(course_name, source_id)
+
+
+def page_audits(course_name: str | None) -> None:
+    st.header("Audits")
+    if not _require_course():
+        return
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="audit_source")
+    if not source_id:
+        return
+
+    st.session_state.limit_chunks = st.number_input(
+        "Limit chunks (0 = all)",
+        min_value=0,
+        value=int(st.session_state.limit_chunks),
+    )
+    st.session_state.only_needs_review = st.checkbox(
+        "Only chunks needing review",
+        value=st.session_state.only_needs_review,
+    )
+    st.session_state.overwrite = st.checkbox(
+        "Overwrite packet files",
+        value=st.session_state.overwrite,
+        key="audit_overwrite",
+    )
+    limit = (
+        int(st.session_state.limit_chunks)
+        if int(st.session_state.limit_chunks) > 0
+        else None
+    )
+
+    st.subheader("Intermediate audit")
+    if st.button("Export intermediate audit packet"):
+        try:
+            summary = build_intermediate_audit_packet(
+                course_name,
+                source_id,
+                limit_chunks=limit,
+                only_needs_review=st.session_state.only_needs_review,
+                overwrite=st.session_state.overwrite,
+            )
+            _show_result_summary("Packet exported", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.write("Import intermediate audit")
+    ia_upload = st.file_uploader("Intermediate audit file", type=["md", "txt"], key="ia_file")
+    ia_text = st.text_area("Or paste intermediate audit text", height=150, key="ia_text")
+    ia_notes = st.text_input("Notes (optional)", key="ia_notes")
+    if st.button("Import intermediate audit"):
+        if ia_upload and ia_text.strip():
+            st.error("Provide either a file or pasted text, not both.")
+        elif not ia_upload and not ia_text.strip():
+            st.error("Provide a file or pasted text.")
+        else:
+            try:
+                if ia_upload:
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=Path(ia_upload.name).suffix
+                    ) as tmp:
+                        tmp.write(ia_upload.getvalue())
+                        path = Path(tmp.name)
+                    summary = import_intermediate_audit(
+                        course_name,
+                        source_id,
+                        audit_file=path,
+                        notes=ia_notes or None,
+                    )
+                    path.unlink(missing_ok=True)
+                else:
+                    summary = import_intermediate_audit(
+                        course_name,
+                        source_id,
+                        audit_text=ia_text,
+                        notes=ia_notes or None,
+                    )
+                _show_result_summary("Intermediate audit imported", summary)
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+
+    st.subheader("Final audit")
+    if st.button("Export final audit packet"):
+        try:
+            summary = build_final_audit_packet(
+                course_name,
+                source_id,
+                limit_chunks=limit,
+                only_needs_review=st.session_state.only_needs_review,
+                overwrite=st.session_state.overwrite,
+            )
+            _show_result_summary("Packet exported", summary)
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.write("Import final audit")
+    fa_upload = st.file_uploader("Final audit file", type=["md", "txt"], key="fa_file")
+    fa_text = st.text_area("Or paste final audit text", height=150, key="fa_text")
+    fa_notes = st.text_input("Notes (optional)", key="fa_notes")
+    if st.button("Import final audit"):
+        if fa_upload and fa_text.strip():
+            st.error("Provide either a file or pasted text, not both.")
+        elif not fa_upload and not fa_text.strip():
+            st.error("Provide a file or pasted text.")
+        else:
+            try:
+                if fa_upload:
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=Path(fa_upload.name).suffix
+                    ) as tmp:
+                        tmp.write(fa_upload.getvalue())
+                        path = Path(tmp.name)
+                    summary = import_final_audit(
+                        course_name,
+                        source_id,
+                        audit_file=path,
+                        notes=fa_notes or None,
+                    )
+                    path.unlink(missing_ok=True)
+                else:
+                    summary = import_final_audit(
+                        course_name,
+                        source_id,
+                        audit_text=fa_text,
+                        notes=fa_notes or None,
+                    )
+                _show_result_summary("Final audit imported", summary)
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+
+    _render_file_preview(course_name, source_id)
+
+
+def _render_file_preview(course_name: str, source_id: str) -> None:
+    st.subheader("File preview")
+    try:
+        sources = {s["id"]: s for s in list_sources(course_name)}
+        entry = sources.get(source_id)
+        if not entry:
+            return
+        paths = [
+            ("Extracted text", entry.get("extracted_text_path")),
+            ("Combined digest", entry.get("local_digest_path")),
+            ("Digest review", None),
+            ("Intermediate packet", None),
+            ("Latest intermediate audit", entry.get("latest_intermediate_audit_path")),
+            ("Final packet", None),
+            ("Latest final audit", entry.get("latest_final_audit_path")),
+        ]
+        course_path = resolve_course_path(course_name)
+        review_path = (
+            course_path
+            / "03_Local_Digests"
+            / source_id
+            / f"{source_id}_local_digest_review.md"
+        )
+        paths[2] = ("Digest review", str(review_path) if review_path.is_file() else None)
+
+        pick_labels = [p[0] for p in paths if p[1]]
+        pick_map = {p[0]: p[1] for p in paths if p[1]}
+        if not pick_labels:
+            st.info("No output files to preview yet.")
+            return
+        label = st.selectbox("Preview file", pick_labels)
+        path = Path(pick_map[label])
+        st.code(str(path))
+        if path.suffix.lower() in {".md", ".txt", ".json"}:
+            st.text_area("Content", read_text_preview(path), height=300)
+    except Exception as exc:
+        _show_exception(exc)
+
+
+def page_settings() -> None:
+    st.header("Settings")
+    root = Path(st.session_state.project_root)
+    try:
+        config = load_config(root)
+        courses_dir = get_courses_dir(root, config)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.write(f"**Project root:** `{root}`")
+    st.write(f"**Courses directory:** `{courses_dir}`")
+    st.write(f"**Default LM Studio URL:** `{DEFAULT_BASE_URL}`")
+    st.info(
+        "Settings are session-based for now (LM URL on Pipeline page). "
+        "Config file: `config/studyforge_config.json`."
+    )
+
+
+def run() -> None:
+    """Entry point for Streamlit."""
+    st.set_page_config(page_title="StudyForge", page_icon="📚", layout="wide")
+    _init_session_state()
+    page, course_name = _render_sidebar()
+
+    if page == "Dashboard":
+        page_dashboard(course_name)
+    elif page == "Courses":
+        page_courses()
+    elif page == "Sources":
+        page_sources(course_name)
+    elif page == "Pipeline":
+        page_pipeline(course_name)
+    elif page == "Audits":
+        page_audits(course_name)
+    elif page == "Settings":
+        page_settings()
+
+
+def main() -> None:
+    run()
+
+
+if __name__ == "__main__":
+    main()

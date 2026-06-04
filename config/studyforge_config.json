@@ -1,0 +1,10 @@
+{
+  "app_name": "StudyForge",
+  "version": "0.1.0",
+  "project_root": "C:/StudyForge",
+  "courses_dir": "C:/StudyForge/courses",
+  "default_course_template": "_Course_Template",
+  "local_first": true,
+  "use_sqlite_later": true,
+  "use_vector_store_later": true
+}
