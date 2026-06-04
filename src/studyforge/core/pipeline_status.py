@@ -15,6 +15,9 @@ from studyforge.core.digest_jobs import get_local_digest_dir, get_local_digest_l
 from studyforge.core.extraction_jobs import find_source_by_id
 from studyforge.core.secrets import get_google_api_key
 from studyforge.core.sources import resolve_course_path
+from studyforge.study.active_recall import get_active_recall_pipeline_warnings
+from studyforge.study.mistakes import get_mistakes_pipeline_warning
+from studyforge.study.weak_points import get_weak_points_pipeline_warning
 
 STUDY_OUTPUTS_BASE = Path("06_Study_Outputs")
 
@@ -313,6 +316,19 @@ def get_pipeline_status(
 
     if packet_notes:
         warnings.append("Optional packets on disk: " + "; ".join(packet_notes))
+
+    warnings.extend(
+        get_active_recall_pipeline_warnings(
+            course_path, normalized_id, study_pack_done
+        )
+    )
+
+    mistake_warning = get_mistakes_pipeline_warning(course_path.name, root)
+    if mistake_warning:
+        warnings.append(mistake_warning)
+    weak_warning = get_weak_points_pipeline_warning(course_path.name, root)
+    if weak_warning:
+        warnings.append(weak_warning)
 
     completed_steps = [label for key, label in STEP_ORDER if steps[key]["done"]]
     missing_steps = [label for key, label in STEP_ORDER if not steps[key]["done"]]

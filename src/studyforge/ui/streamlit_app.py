@@ -35,10 +35,38 @@ from studyforge.llm.lm_studio_client import (
     choose_default_model,
 )
 from studyforge.study.digest_review import review_local_digest_for_source
+from studyforge.study.active_recall import (
+    ActiveRecallNotReadyError,
+    InvalidGradeError,
+    export_active_recall_summary_markdown,
+    get_active_recall_log_path,
+    get_first_unanswered_question,
+    load_active_recall_log,
+    load_questions_for_source,
+    record_active_recall_attempt,
+    summarize_active_recall_log,
+)
+from studyforge.study.mistakes import (
+    InvalidMistakeStatusError,
+    MistakeNotFoundError,
+    add_mistake,
+    export_mistakes_markdown,
+    list_mistakes,
+    update_mistake_status,
+)
 from studyforge.study.study_pack import (
     FinalAuditNotFoundError,
     StudyPackOutputExistsError,
     generate_study_pack,
+)
+from studyforge.study.weak_points import (
+    InvalidConfidenceError,
+    InvalidWeakPointStatusError,
+    WeakPointNotFoundError,
+    add_weak_point,
+    export_weak_points_markdown,
+    list_weak_points,
+    update_weak_point,
 )
 from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_no
 
@@ -48,6 +76,8 @@ NAV_PAGES = [
     "Sources",
     "Pipeline",
     "Audits",
+    "Active Recall",
+    "Review Tracker",
     "Settings",
 ]
 
@@ -741,6 +771,334 @@ def _render_file_preview(course_name: str, source_id: str) -> None:
         _show_exception(exc)
 
 
+def page_active_recall(course_name: str | None) -> None:
+    st.header("Active Recall")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Practice one question at a time and self-grade (no AI). "
+        "Requires a generated study pack with an active recall file."
+    )
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="ar_source")
+    if not source_id:
+        return
+
+    try:
+        questions = load_questions_for_source(course_name, source_id)
+        summary = summarize_active_recall_log(course_name, source_id)
+    except ActiveRecallNotReadyError as exc:
+        st.warning(str(exc))
+        st.info("Generate a study pack on the **Pipeline** page first.")
+        return
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    if not questions:
+        st.warning("No questions found in the active recall file.")
+        return
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Attempts", summary["attempt_count"])
+    c2.metric("Correct", summary["correct"])
+    c3.metric("Partial", summary["partial"])
+    c4.metric("Wrong", summary["wrong"])
+    c5.metric("Skipped", summary["skipped"])
+    c6.metric("Accuracy %", summary["accuracy_percent"])
+
+    labels = [
+        f"#{q['question_number']} — {q['question'][:80]}"
+        for q in questions
+    ]
+    id_by_label = {labels[i]: questions[i] for i in range(len(questions))}
+
+    col_sel, col_next = st.columns([3, 1])
+    with col_sel:
+        chosen_label = st.selectbox("Question", labels, key=f"ar_q_select_{source_id}")
+    with col_next:
+        st.write("")
+        if st.button("Next unanswered", key=f"ar_next_{source_id}"):
+            course_path = resolve_course_path(course_name)
+            log = load_active_recall_log(
+                get_active_recall_log_path(course_path, source_id)
+            )
+            next_q = get_first_unanswered_question(questions, log)
+            if next_q:
+                st.session_state[f"ar_q_select_{source_id}"] = (
+                    f"#{next_q['question_number']} — {next_q['question'][:80]}"
+                )
+                st.rerun()
+            st.info("Every question has at least one attempt recorded.")
+
+    current = id_by_label[chosen_label]
+    st.subheader(f"Question {current['question_number']}")
+    st.write(current["question"])
+    st.caption(f"ID: `{current['question_id']}`")
+
+    user_answer = st.text_area(
+        "Your answer",
+        height=120,
+        key=f"ar_answer_{source_id}_{current['question_id']}",
+    )
+    grade = st.selectbox(
+        "Grade",
+        ["correct", "partial", "wrong", "skipped"],
+        key=f"ar_grade_{source_id}_{current['question_id']}",
+    )
+    notes = st.text_input(
+        "Notes (optional)",
+        key=f"ar_notes_{source_id}_{current['question_id']}",
+    )
+
+    if st.button("Save attempt", key=f"ar_save_{source_id}"):
+        try:
+            result = record_active_recall_attempt(
+                course_name,
+                source_id,
+                current["question_id"],
+                current["question"],
+                user_answer,
+                grade,
+                notes=notes or None,
+            )
+            st.success(
+                f"Saved {result['attempt_id']} — grade: {result['grade']}"
+            )
+            st.rerun()
+        except InvalidGradeError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    if st.button("Export summary", key=f"ar_export_{source_id}"):
+        try:
+            path = export_active_recall_summary_markdown(course_name, source_id)
+            st.success(f"Summary exported: `{path}`")
+        except Exception as exc:
+            _show_exception(exc)
+
+
+def _weak_active_recall_attempts(course_name: str, source_id: str) -> list[dict]:
+    """Return wrong, partial, or skipped attempts (most recent first)."""
+    course_path = resolve_course_path(course_name)
+    log = load_active_recall_log(get_active_recall_log_path(course_path, source_id))
+    weak_grades = {"wrong", "partial", "skipped"}
+    attempts = [
+        attempt
+        for attempt in log.get("attempts", [])
+        if str(attempt.get("grade", "")).lower() in weak_grades
+    ]
+    return list(reversed(attempts))
+
+
+def page_review_tracker(course_name: str | None) -> None:
+    st.header("Review Tracker")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Track mistakes and weak points from active recall (deterministic, no AI)."
+    )
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="rt_source")
+    if not source_id:
+        return
+
+    st.subheader("Active Recall Weak Attempts")
+    weak_attempts = _weak_active_recall_attempts(course_name, source_id)
+    if not weak_attempts:
+        st.info("No wrong, partial, or skipped attempts for this source yet.")
+    else:
+        labels = [
+            f"{a.get('attempt_id', '?')} ({a.get('grade')}) — "
+            f"{a.get('question', '')[:70]}"
+            for a in weak_attempts
+        ]
+        pick = st.selectbox("Select attempt", labels, key=f"rt_attempt_{source_id}")
+        attempt = weak_attempts[labels.index(pick)]
+        st.write(f"**Question:** {attempt.get('question', '')}")
+        st.write(f"**Your answer:** {attempt.get('user_answer', '')}")
+        st.write(f"**Grade:** {attempt.get('grade', '')}")
+        if attempt.get("notes"):
+            st.write(f"**Notes:** {attempt.get('notes')}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Create mistake from selected attempt", key=f"rt_mistake_{source_id}"):
+                try:
+                    result = add_mistake(
+                        course_name,
+                        source_id,
+                        attempt.get("question", ""),
+                        attempt.get("user_answer", ""),
+                        question_id=attempt.get("question_id"),
+                        why_wrong=attempt.get("notes") or "",
+                    )
+                    st.success(f"Created {result['mistake_id']}")
+                    st.rerun()
+                except Exception as exc:
+                    _show_exception(exc)
+        with c2:
+            if st.button(
+                "Create weak point from selected attempt", key=f"rt_weak_{source_id}"
+            ):
+                try:
+                    concept = (attempt.get("question") or "")[:80]
+                    result = add_weak_point(
+                        course_name,
+                        source_id,
+                        concept,
+                        why_hard=attempt.get("notes") or "",
+                        what_to_review=attempt.get("question", ""),
+                    )
+                    st.success(f"Created {result['weak_point_id']}")
+                    st.rerun()
+                except Exception as exc:
+                    _show_exception(exc)
+
+    st.subheader("Mistakes Log")
+    mistakes = list_mistakes(course_name)
+    if mistakes:
+        st.dataframe(
+            [
+                {
+                    "ID": m.get("mistake_id"),
+                    "Source": m.get("source_id"),
+                    "Status": m.get("status"),
+                    "Question": (m.get("question") or "")[:60],
+                }
+                for m in mistakes
+            ],
+            use_container_width=True,
+        )
+        mistake_ids = [m["mistake_id"] for m in mistakes]
+        upd_id = st.selectbox("Update mistake", mistake_ids, key="rt_mistake_upd_id")
+        new_status = st.selectbox(
+            "New status",
+            ["new", "reviewed_once", "still_weak", "mastered"],
+            key="rt_mistake_upd_status",
+        )
+        if st.button("Update mistake status", key="rt_mistake_upd_btn"):
+            try:
+                update_mistake_status(course_name, upd_id, new_status)
+                st.success(f"Updated {upd_id}")
+                st.rerun()
+            except (InvalidMistakeStatusError, MistakeNotFoundError) as exc:
+                st.error(str(exc))
+    else:
+        st.info("No mistakes logged yet.")
+
+    with st.expander("Add mistake manually"):
+        m_q = st.text_input("Question", key="rt_m_q")
+        m_a = st.text_input("Your answer", key="rt_m_a")
+        m_src = st.text_input("Source ID", value=source_id, key="rt_m_src")
+        m_why = st.text_input("Why wrong", key="rt_m_why")
+        m_avoid = st.text_input("How to avoid", key="rt_m_avoid")
+        if st.button("Add mistake", key="rt_m_add"):
+            if not m_q.strip():
+                st.error("Question is required.")
+            else:
+                try:
+                    add_mistake(
+                        course_name,
+                        m_src,
+                        m_q,
+                        m_a,
+                        why_wrong=m_why or None,
+                        how_to_avoid=m_avoid or None,
+                    )
+                    st.success("Mistake added.")
+                    st.rerun()
+                except Exception as exc:
+                    _show_exception(exc)
+
+    if st.button("Export mistakes Markdown", key="rt_m_export"):
+        try:
+            path = export_mistakes_markdown(course_name)
+            st.success(f"Exported to `{path}`")
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.subheader("Weak Points")
+    weak_items = list_weak_points(course_name)
+    if weak_items:
+        st.dataframe(
+            [
+                {
+                    "ID": w.get("weak_point_id"),
+                    "Concept": (w.get("concept") or "")[:50],
+                    "Confidence": w.get("confidence_level"),
+                    "Status": w.get("status"),
+                    "Source": w.get("source_id"),
+                }
+                for w in weak_items
+            ],
+            use_container_width=True,
+        )
+        weak_ids = [w["weak_point_id"] for w in weak_items]
+        w_upd_id = st.selectbox("Update weak point", weak_ids, key="rt_weak_upd_id")
+        w_conf = st.number_input(
+            "Confidence (1–5)", min_value=1, max_value=5, value=2, key="rt_weak_conf"
+        )
+        w_status = st.selectbox(
+            "New status",
+            ["new", "reviewing", "still_weak", "improving", "mastered"],
+            key="rt_weak_upd_status",
+        )
+        if st.button("Update weak point", key="rt_weak_upd_btn"):
+            try:
+                update_weak_point(
+                    course_name, w_upd_id, confidence_level=int(w_conf), status=w_status
+                )
+                st.success(f"Updated {w_upd_id}")
+                st.rerun()
+            except (
+                InvalidConfidenceError,
+                InvalidWeakPointStatusError,
+                WeakPointNotFoundError,
+            ) as exc:
+                st.error(str(exc))
+    else:
+        st.info("No weak points logged yet.")
+
+    with st.expander("Add weak point manually"):
+        w_concept = st.text_input("Concept", key="rt_w_concept")
+        w_src = st.text_input("Source ID", value=source_id, key="rt_w_src")
+        w_conf_add = st.slider("Confidence", 1, 5, 2, key="rt_w_conf_add")
+        w_why = st.text_input("Why hard", key="rt_w_why")
+        w_review = st.text_input("What to review", key="rt_w_review")
+        w_practice = st.text_input("Practice needed", key="rt_w_practice")
+        if st.button("Add weak point", key="rt_w_add"):
+            if not w_concept.strip():
+                st.error("Concept is required.")
+            else:
+                try:
+                    add_weak_point(
+                        course_name,
+                        w_src,
+                        w_concept,
+                        confidence_level=int(w_conf_add),
+                        why_hard=w_why or None,
+                        what_to_review=w_review or None,
+                        practice_needed=w_practice or None,
+                    )
+                    st.success("Weak point added.")
+                    st.rerun()
+                except Exception as exc:
+                    _show_exception(exc)
+
+    if st.button("Export weak points Markdown", key="rt_w_export"):
+        try:
+            path = export_weak_points_markdown(course_name)
+            st.success(f"Exported to `{path}`")
+        except Exception as exc:
+            _show_exception(exc)
+
+
 def page_settings() -> None:
     st.header("Settings")
     root = Path(st.session_state.project_root)
@@ -798,6 +1156,10 @@ def run() -> None:
         page_pipeline(course_name)
     elif page == "Audits":
         page_audits(course_name)
+    elif page == "Active Recall":
+        page_active_recall(course_name)
+    elif page == "Review Tracker":
+        page_review_tracker(course_name)
     elif page == "Settings":
         page_settings()
 

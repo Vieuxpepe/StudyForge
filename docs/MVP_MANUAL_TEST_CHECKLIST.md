@@ -27,6 +27,15 @@ Work through one source end-to-end on your machine.
 - [ ] Open flashcards
 - [ ] Open practice quiz
 - [ ] Confirm Pipeline Doctor says study pack ready
+- [ ] Open **Active Recall** page and list questions
+- [ ] Answer one question and save attempt (self-grade)
+- [ ] Export active recall summary
+- [ ] Confirm log exists under `07_My_Work/active_recall_logs/`
+- [ ] Open **Review Tracker** and view weak recall attempts
+- [ ] Create a mistake from a weak attempt (or add manually)
+- [ ] Create a weak point from a weak attempt (or add manually)
+- [ ] Export mistakes and weak points Markdown
+- [ ] Confirm `07_My_Work/mistakes_log.json` and `weak_points.json` exist
 
 ## Pass criteria
 
@@ -45,6 +54,8 @@ Work through one source end-to-end on your machine.
 | Extract / chunk / digest / review | **Pipeline** |
 | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
 | Intermediate/final audits | **Audits** |
+| Active recall practice | **Active Recall** |
+| Mistakes / weak points | **Review Tracker** |
 | LM Studio URL / tokens | **Pipeline** |
 | Google API key | **Settings** |
 

@@ -15,6 +15,8 @@ StudyForge can:
 - export and import **intermediate audits** (manual packet or automated Google AI)
 - export and import **final audits** (manual packet workflow)
 - **generate final study packs** from the latest final audit (deterministic parser, no AI)
+- **practice active recall** with self-grading (correct / partial / wrong / skipped, no AI)
+- **track mistakes and weak points** from recall practice (manual, deterministic)
 - show **Pipeline Doctor** status and next recommended step in the GUI
 
 Outputs live under each course folder (for example `02_Extracted_Text/`, `03_Local_Digests/`, `04_Intermediate_Audits/`, `05_Final_Audits/`, `06_Study_Outputs/`).
@@ -38,7 +40,9 @@ python scripts/launch_gui.py
 2. **Sources** — upload a PDF.
 3. **Pipeline** — extract, chunk, local digest, review; use **Pipeline Doctor** for the next step; after a final audit, use **Study Pack** to generate guides and flashcards.
 4. **Audits** — export/import intermediate and final audits (or run automated intermediate audit if Google API key is set).
-5. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
+5. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
+6. **Review Tracker** — mistakes log, weak points, and promote weak recall attempts to trackers.
+7. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
 
 The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
 
@@ -82,6 +86,28 @@ python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id
 python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
 ```
 
+Active recall practice (after study pack; no AI grading):
+
+```bash
+python scripts/active_recall.py --course ECA1010_Microeconomics --source-id SRC-0001 --list
+python scripts/active_recall.py --course ECA1010_Microeconomics --source-id SRC-0001 --summary
+python scripts/active_recall.py --course ECA1010_Microeconomics --source-id SRC-0001 --record \
+  --question-id AR-SRC-0001-Q001 --answer "My answer" --grade partial --notes "Optional note"
+
+python scripts/active_recall.py --course ECA1010_Microeconomics --source-id SRC-0001 --record \
+  --question-id AR-SRC-0001-Q001 --answer "My answer" --grade wrong --create-mistake --create-weak-point
+```
+
+Mistakes log and weak points (course-level under `07_My_Work/`):
+
+```bash
+python scripts/mistakes.py --course ECA1010_Microeconomics --list
+python scripts/mistakes.py --course ECA1010_Microeconomics --export
+
+python scripts/weak_points.py --course ECA1010_Microeconomics --list
+python scripts/weak_points.py --course ECA1010_Microeconomics --export
+```
+
 Check progress anytime:
 
 ```bash
@@ -121,6 +147,8 @@ Tests: `tests/test_audit_sanitizer.py`, `tests/test_intermediate_audit_jobs.py`.
 - No spaced repetition scheduling
 - No AI grading of quiz answers
 - Study pack generation is **deterministic** (parses final audit Markdown; does not call an LLM)
+- Active recall uses **self-grading** only (no AI answer checking)
+- Mistakes and weak points are **manual** trackers (JSON + optional Markdown export)
 - Final audit quality depends on your external reviewer (ChatGPT, etc.) and template headings
 - LM Studio and Google AI require local setup and API keys where applicable
 

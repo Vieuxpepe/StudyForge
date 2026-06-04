@@ -19,3 +19,6 @@ Utility and setup scripts.
 - `export_final_audit_packet.py` — export packet for ChatGPT final audit (`--course`, `--source-id`, optional `--limit-chunks`, `--only-needs-review`, `--overwrite`)
 - `import_final_audit.py` — import manual final audit (`--course`, `--source-id`, `--file` or `--text`, optional `--auditor-name`, `--notes`)
 - `generate_study_pack.py` — build study guide, flashcards, formula sheet, practice quiz, active recall, and weak-points seed from latest final audit (`--course`, `--source-id`, optional `--overwrite`); no AI. Also available on GUI **Pipeline** → **Study Pack**
+- `active_recall.py` — list questions, record self-graded attempts, export summary (`--list`, `--record`, `--summary`); optional `--create-mistake`, `--create-weak-point`, `--weak-point-concept` on `--record`; logs under `07_My_Work/active_recall_logs/`; GUI **Active Recall** page
+- `mistakes.py` — course mistakes log (`--list`, `--add`, `--update-status`, `--export`); files `07_My_Work/mistakes_log.json` / `mistakes_log.md`
+- `weak_points.py` — weak points tracker (`--list`, `--add`, `--update`, `--export`); files `07_My_Work/weak_points.json` / `weak_points.md`; GUI **Review Tracker** page
