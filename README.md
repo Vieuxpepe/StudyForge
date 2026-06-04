@@ -1,12 +1,27 @@
 # StudyForge
 
-StudyForge is a local-first AI study pipeline for digesting source material,
-creating study notes, auditing AI-generated outputs, generating study packs,
-and tracking mistakes and weak points.
+StudyForge is a **local-first AI study pipeline** that helps you turn course PDFs into reviewed notes, audited study material, and practical study files—without sending your whole library to the cloud by default.
 
-## Graphical interface (Streamlit)
+## What it does today
 
-Install dependencies and launch the GUI from the project root:
+StudyForge can:
+
+- create courses from a folder template
+- register source PDFs per course
+- extract text from PDFs
+- chunk extracted text for LLM-sized packets
+- run **LM Studio** local digest (per chunk + combined digest)
+- review local digest quality with **rule-based checks** (no AI)
+- export and import **intermediate audits** (manual packet or automated Google AI)
+- export and import **final audits** (manual packet workflow)
+- **generate final study packs** from the latest final audit (deterministic parser, no AI)
+- show **Pipeline Doctor** status and next recommended step in the GUI
+
+Outputs live under each course folder (for example `02_Extracted_Text/`, `03_Local_Digests/`, `04_Intermediate_Audits/`, `05_Final_Audits/`, `06_Study_Outputs/`).
+
+## Quick GUI start
+
+From the project root:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -19,117 +34,113 @@ Or:
 python scripts/launch_gui.py
 ```
 
-The GUI wraps the same backend functions as the CLI scripts (courses, sources, pipeline, audits).
+1. **Courses** — create or select a course.
+2. **Sources** — upload a PDF.
+3. **Pipeline** — extract, chunk, local digest, review; use **Pipeline Doctor** for the next step; after a final audit, use **Study Pack** to generate guides and flashcards.
+4. **Audits** — export/import intermediate and final audits (or run automated intermediate audit if Google API key is set).
+5. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
 
-## Quick start (CLI)
+The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
 
-Run the scaffold script (safe to re-run):
+**Study Pack (GUI):** On **Pipeline**, after importing a final audit, use the **Study Pack** section (below Pipeline Doctor). After importing a final audit, generate a study pack to create the final guide, flashcards, formula sheet, quiz, active recall file, and weak-points seed.
+
+## Quick CLI end-to-end workflow
+
+One-time scaffold (safe to re-run):
 
 ```bash
 python scripts/init_studyforge_structure.py
 ```
 
-Create a course from the template:
+Full path for one source (replace paths and course name as needed):
 
 ```bash
 python scripts/create_course.py --code ECA1010 --name "Microeconomics"
-python scripts/create_course.py --list
-```
 
-Add source material to a course:
+python scripts/add_source.py --course ECA1010_Microeconomics --type textbook --file "C:\path\to\book.pdf" --title "Main Textbook"
 
-```bash
-python scripts/add_source.py --course ECA1010_Microeconomics --type textbook \
-  --file "C:\path\to\book.pdf" --title "Main Textbook"
-python scripts/add_source.py --course ECA1010_Microeconomics --list
-```
-
-Extract text from a registered PDF (requires PyMuPDF):
-
-```bash
-python -m pip install -r requirements.txt
-python -c "import fitz; print('PyMuPDF OK')"
 python scripts/extract_source.py --course ECA1010_Microeconomics --source-id SRC-0001
-python scripts/extract_source.py --course ECA1010_Microeconomics --source-id SRC-0001 --overwrite
-```
 
-Chunk extracted text into source packets:
-
-```bash
 python scripts/chunk_source.py --course ECA1010_Microeconomics --source-id SRC-0001
-python scripts/chunk_source.py --course ECA1010_Microeconomics --source-id SRC-0001 --max-words 1000 --overlap-words 100 --overwrite
-```
 
-Local digest via LM Studio (start LM Studio and load a model first):
+python scripts/check_lm_studio.py --base-url "http://localhost:1234/v1"
 
-```bash
-python -m pip install -r requirements.txt
-python scripts/check_lm_studio.py
 python scripts/run_local_digest.py --course ECA1010_Microeconomics --source-id SRC-0001 --limit-chunks 1
+
 python scripts/run_local_digest.py --course ECA1010_Microeconomics --source-id SRC-0001
-```
 
-Review local digest quality (no AI):
-
-```bash
 python scripts/review_local_digest.py --course ECA1010_Microeconomics --source-id SRC-0001
+
+python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001
+
+python scripts/import_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\gemini_audit.md"
+
+python scripts/export_final_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001
+
+python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\final_audit.md"
+
+python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
 ```
 
-Check pipeline status and next recommended step:
+Check progress anytime:
 
 ```bash
 python scripts/pipeline_status.py --course ECA1010_Microeconomics --source-id SRC-0001
 ```
 
-Export intermediate audit packet for manual Gemini / AI Studio review:
+### Automated intermediate audit (optional)
 
-```bash
-python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001
-python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --limit-chunks 1 --overwrite
-python scripts/export_intermediate_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --only-needs-review --overwrite
-```
-
-Run automated intermediate audit (Google AI / Gemma 4; output is cleaned to remove scratchpad noise):
+Requires `GOOGLE_API_KEY` (`.env` or Settings in GUI). Output is **sanitized** before save (see below).
 
 ```bash
 python scripts/run_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001
 python scripts/run_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --keep-raw
 ```
 
-Import Gemini intermediate audit (versioned storage):
+`--keep-raw` skips sanitizer cleanup for debugging only.
 
-```bash
-python scripts/import_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\gemini_audit.md"
-python scripts/import_intermediate_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --text "Audit content" --notes "First pass"
-```
+## Privacy note
 
-Export final audit packet for manual ChatGPT review:
+**Do not commit real course data.** `.gitignore` ignores all folders under `courses/` except `courses/README.md` and `courses/_Course_Template/`. That includes PDFs, extracted text, digests, audits, and `06_Study_Outputs/` study packs.
 
-```bash
-python scripts/export_final_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001
-python scripts/export_final_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --limit-chunks 1 --overwrite
-python scripts/export_final_audit_packet.py --course ECA1010_Microeconomics --source-id SRC-0001 --only-needs-review --overwrite
-```
+Also ignored: `.env`, `*.env`, `config/local_secrets.json`, local DB files, and common temp/log paths.
 
-Import ChatGPT final audit (versioned storage):
+If you previously committed a real course folder, run `git rm -r --cached courses/YourCourse` once (files stay on disk) so Git stops tracking them.
 
-```bash
-python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\final_audit.md"
-python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --text "Final audit content" --notes "First pass"
-```
+## Audit sanitizer (automated intermediate audit)
 
-Generate study pack from the latest final audit (no AI; deterministic parser):
+`src/studyforge/audits/audit_sanitizer.py` provides `sanitize_audit_output()` / `sanitize_audit_output_with_stats()`. It strips scratchpad blocks, excessive reasoning, and other noise from **automated** Google AI intermediate audit responses before they are saved. Manual imports via `import_intermediate_audit.py` are stored as provided.
 
-```bash
-python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
-python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001 --overwrite
-```
+Tests: `tests/test_audit_sanitizer.py`, `tests/test_intermediate_audit_jobs.py`.
+
+## Current limitations (MVP)
+
+- No SQLite / central database
+- No vector search or RAG index
+- No autonomous agents
+- No spaced repetition scheduling
+- No AI grading of quiz answers
+- Study pack generation is **deterministic** (parses final audit Markdown; does not call an LLM)
+- Final audit quality depends on your external reviewer (ChatGPT, etc.) and template headings
+- LM Studio and Google AI require local setup and API keys where applicable
+
+## Recommended first real test
+
+1. Create a course with one short PDF (a few pages).
+2. Run through the [MVP manual test checklist](docs/MVP_MANUAL_TEST_CHECKLIST.md).
+3. After final audit import, generate the study pack and open `06_Study_Outputs/study_guides/` and `flashcards/`.
+4. Confirm Pipeline Doctor shows **Study pack ready**.
+5. Run `git status` and confirm no files under your real course path are staged.
+
+## More CLI detail
+
+Individual scripts (flags, overwrite, limits) are listed in [scripts/README.md](scripts/README.md).
 
 ## Layout
 
 - `config/` — application settings
-- `courses/` — per-course data and pipeline outputs
-- `docs/` — specifications and planning documents
+- `courses/` — per-course data and pipeline outputs (real courses gitignored)
+- `docs/` — specifications, planning, manual test checklist
 - `prompts/` — LLM prompt templates
 - `scripts/` — setup and utility scripts
 - `src/studyforge/` — Python application code

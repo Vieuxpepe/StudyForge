@@ -1,0 +1,67 @@
+# StudyForge MVP Manual Test Checklist
+
+Use this checklist after code changes or before trusting StudyForge with a real course.
+Work through one source end-to-end on your machine.
+
+## Checklist
+
+- [ ] Launch GUI
+- [ ] Create/select course
+- [ ] Upload/register a real PDF
+- [ ] Confirm source appears in dashboard
+- [ ] Extract PDF
+- [ ] Open extracted text preview
+- [ ] Chunk source
+- [ ] Confirm chunk manifest exists
+- [ ] Check LM Studio connection
+- [ ] Run local digest first chunk only
+- [ ] Inspect first chunk digest
+- [ ] Run full local digest
+- [ ] Run local digest review
+- [ ] Export intermediate audit packet
+- [ ] Run/import intermediate audit
+- [ ] Export final audit packet
+- [ ] Run/import final audit
+- [ ] Generate study pack
+- [ ] Open final study guide
+- [ ] Open flashcards
+- [ ] Open practice quiz
+- [ ] Confirm Pipeline Doctor says study pack ready
+
+## Pass criteria
+
+- No crashes
+- Pipeline Doctor next action makes sense at each step
+- Generated files exist on disk under the course folder
+- Study pack files are usable (guide, flashcards, quiz, active recall, weak-points seed)
+- No private PDFs or course outputs committed to Git (`git status` should not list files under `courses/<YourCourse>/` except the template)
+
+## GUI quick map
+
+| Step | Where in GUI |
+|------|----------------|
+| Course | Sidebar + **Courses** |
+| Source PDF | **Sources** |
+| Extract / chunk / digest / review | **Pipeline** |
+| Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
+| Intermediate/final audits | **Audits** |
+| LM Studio URL / tokens | **Pipeline** |
+| Google API key | **Settings** |
+
+## CLI equivalent (optional)
+
+See `README.md` — **Quick CLI end-to-end workflow** for the full command sequence.
+
+Study pack (after final audit import):
+
+```bash
+python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
+```
+
+## Automated intermediate audit note
+
+Automated intermediate audits (`run_intermediate_audit.py`) pass through `audit_sanitizer.py` to remove scratchpad/reasoning noise before save. Use `--keep-raw` only when debugging. Manual imports are not sanitized automatically.
+
+## Notes / Issues Found
+
+<!-- Record anything that failed, looked wrong, or needs a follow-up -->

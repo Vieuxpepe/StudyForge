@@ -182,8 +182,9 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
     """Generate and preview study pack outputs from the latest final audit."""
     st.subheader("Study Pack")
     st.caption(
-        "Deterministic export from the latest imported final audit (no AI). "
-        "Requires a final audit on disk."
+        "After importing a final audit, generate a study pack to create the final "
+        "guide, flashcards, formula sheet, quiz, active recall file, and weak-points "
+        "seed. Deterministic export from the latest final audit (no AI)."
     )
 
     action_key = (pipeline_status or {}).get("next_action", {}).get("key", "")
