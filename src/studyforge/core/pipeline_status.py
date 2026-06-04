@@ -74,6 +74,11 @@ _NEXT_ACTIONS: dict[str, dict[str, str]] = {
         "reason": "Final audit exists, but no study pack has been generated yet.",
         "gui_hint": "Pipeline — Study Pack section: Generate study pack.",
     },
+    "regenerate_study_pack": {
+        "label": "Regenerate study pack",
+        "reason": "A newer final audit exists than the one used for the current study pack.",
+        "gui_hint": "Pipeline — Study Pack section: regenerate with overwrite.",
+    },
     "study_pack_ready": {
         "label": "Study pack ready",
         "reason": "You can study with the guide, flashcards, quiz, and active recall files.",
@@ -144,9 +149,41 @@ def _build_next_action(key: str, extra_reason: str | None = None) -> dict[str, s
     return base
 
 
+def _load_study_pack_manifest_audit_id(manifest_path: Path) -> str | None:
+    """Return ``based_on_final_audit_id`` from a study pack manifest, if present."""
+    if not manifest_path.is_file():
+        return None
+    try:
+        with manifest_path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    audit_id = data.get("based_on_final_audit_id")
+    if audit_id is None:
+        return None
+    text = str(audit_id).strip()
+    return text or None
+
+
+def _stale_study_pack_warning(manifest_audit_id: str, latest_audit_id: str) -> str:
+    return (
+        f"Study pack may be stale: generated from {manifest_audit_id}, "
+        f"but latest final audit is {latest_audit_id}. Regenerate the study pack."
+    )
+
+
+def _build_regenerate_study_pack_action() -> dict[str, str]:
+    """Next action when manifest exists but is behind latest final audit."""
+    action = dict(_NEXT_ACTIONS["regenerate_study_pack"])
+    action["key"] = "generate_study_pack"
+    return action
+
+
 def _determine_next_action(
     steps: dict[str, dict[str, Any]],
     warnings: list[str],
+    *,
+    stale_study_pack: bool = False,
 ) -> dict[str, str]:
     if not steps["source_registered"]["done"]:
         return _build_next_action("source_missing")
@@ -167,6 +204,8 @@ def _determine_next_action(
         return _build_next_action("export_final_audit_packet")
     if not steps["study_pack_generated"]["done"]:
         return _build_next_action("generate_study_pack")
+    if stale_study_pack:
+        return _build_regenerate_study_pack_action()
     return _build_next_action("study_pack_ready")
 
 
@@ -280,6 +319,24 @@ def get_pipeline_status(
             f"Registry lists study pack manifest but file is missing: {study_manifest_path}"
         )
 
+    stale_study_pack = False
+    latest_final_audit_id = str(entry.get("latest_final_audit_id", "")).strip() or None
+    manifest_audit_id = (
+        _load_study_pack_manifest_audit_id(study_manifest_path)
+        if study_pack_done
+        else None
+    )
+    if (
+        study_pack_done
+        and latest_final_audit_id
+        and manifest_audit_id
+        and manifest_audit_id != latest_final_audit_id
+    ):
+        warnings.append(
+            _stale_study_pack_warning(manifest_audit_id, latest_final_audit_id)
+        )
+        stale_study_pack = True
+
     steps: dict[str, dict[str, Any]] = {
         "source_registered": {
             "done": source_registered,
@@ -338,7 +395,7 @@ def get_pipeline_status(
     completed_steps = [label for key, label in STEP_ORDER if steps[key]["done"]]
     missing_steps = [label for key, label in STEP_ORDER if not steps[key]["done"]]
 
-    next_action = _determine_next_action(steps, warnings)
+    next_action = _determine_next_action(steps, warnings, stale_study_pack=stale_study_pack)
 
     return {
         "course": course_path.name,

@@ -18,7 +18,7 @@ StudyForge can:
 - **practice active recall** with self-grading (correct / partial / wrong / skipped, no AI)
 - **track mistakes and weak points** from recall practice (manual, deterministic)
 - **generate daily review plans** from open mistakes, weak points, and weak recall attempts
-- show **Pipeline Doctor** status and next recommended step in the GUI
+- show **Pipeline Doctor** status and next recommended step in the GUI (including stale study pack warnings when a newer final audit was imported)
 - **guided workflow** — run one recommended pipeline step per click (not autonomous)
 
 Outputs live under each course folder (for example `02_Extracted_Text/`, `03_Local_Digests/`, `04_Intermediate_Audits/`, `05_Final_Audits/`, `06_Study_Outputs/`).
@@ -41,7 +41,7 @@ python scripts/launch_gui.py
 1. **Courses** — create or select a course.
 2. **Sources** — upload a PDF.
 3. **Pipeline** — **Guided Workflow** runs one Pipeline Doctor step per click; **Pipeline Doctor** shows progress; manual controls remain below; after a final audit, use **Study Pack**.
-4. **Audits** — export/import intermediate and final audits (or run automated intermediate audit if Google API key is set).
+4. **Audits** — export/import intermediate and final audits; **Final Audit Normalizer** maps messy headings to the study-pack template (or export a manual repair packet).
 5. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
 6. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
 7. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
@@ -85,8 +85,15 @@ python scripts/export_final_audit_packet.py --course ECA1010_Microeconomics --so
 
 python scripts/import_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --file "C:\path\to\final_audit.md"
 
+python scripts/normalize_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/normalize_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --import-as-new-version --overwrite
+python scripts/normalize_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --export-repair-packet --overwrite
+
 python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/generate_study_pack.py --course ECA1010_Microeconomics --source-id SRC-0001 --diagnose-only
 ```
+
+Study pack generation is **deterministic** (no AI) and usually finishes in seconds. That is normal. After generation, check the **quality** report in the CLI or GUI — if the final audit does not use the expected `##` headings, many sections may be empty placeholders (`Not found in final audit.`). Use `--diagnose-only` before overwriting an existing pack to preview section coverage. If quality is `needs_review` or `failed`, run **Final Audit Normalizer** (`scripts/normalize_final_audit.py` or **Audits** page) to map headings to the template, or export a **repair packet** for manual ChatGPT cleanup (no AI inside StudyForge). If you import a newer final audit after generating a study pack, Pipeline Doctor warns that the pack may be stale and suggests **Regenerate study pack** (use overwrite).
 
 Active recall practice (after study pack; no AI grading):
 
@@ -152,6 +159,8 @@ python scripts/run_intermediate_audit.py --course ECA1010_Microeconomics --sourc
 
 Also ignored: `.env`, `*.env`, `config/local_secrets.json`, local DB files, and common temp/log paths.
 
+`source_registry.json` and audit registries store **absolute local paths** to files on your machine. That is intentional for local-only use; do not commit those JSON files (they stay under gitignored `courses/`).
+
 If you previously committed a real course folder, run `git rm -r --cached courses/YourCourse` once (files stay on disk) so Git stops tracking them.
 
 ## Audit sanitizer (automated intermediate audit)
@@ -160,6 +169,10 @@ If you previously committed a real course folder, run `git rm -r --cached course
 
 Tests: `tests/test_audit_sanitizer.py`, `tests/test_intermediate_audit_jobs.py`.
 
+## Architecture / regression notes
+
+See [docs/REGRESSION_LOGIC_AUDIT.md](docs/REGRESSION_LOGIC_AUDIT.md) for status-flow rules, parser overlap notes, CLI/GUI alignment, and known risks from the stabilization audit.
+
 ## Current limitations (MVP)
 
 - No SQLite / central database
@@ -167,7 +180,7 @@ Tests: `tests/test_audit_sanitizer.py`, `tests/test_intermediate_audit_jobs.py`.
 - No autonomous agents
 - No spaced repetition scheduling
 - No AI grading of quiz answers
-- Study pack generation is **deterministic** (parses final audit Markdown; does not call an LLM)
+- Study pack generation is **deterministic** (parses final audit Markdown; does not call an LLM). Quality diagnostics (`ok` / `needs_review` / `failed`) check whether headings were found.
 - Active recall uses **self-grading** only (no AI answer checking)
 - Mistakes and weak points are **manual** trackers (JSON + optional Markdown export)
 - Final audit quality depends on your external reviewer (ChatGPT, etc.) and template headings

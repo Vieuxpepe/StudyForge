@@ -122,6 +122,42 @@ class TestFinalImport(unittest.TestCase):
         self.assertEqual(reg["sources"][0]["status"], "final_audit_imported")
         self.assertEqual(reg["sources"][0]["latest_final_audit_id"], "FA-SRC-0001-V001")
 
+    def test_reimport_warns_stale_study_pack(self) -> None:
+        import_final_audit(
+            "ECA1010_Test", "SRC-0001", audit_text=AUDIT_BODY, root=self.root
+        )
+        from studyforge.core.sources import load_source_registry, save_source_registry
+
+        reg = load_source_registry(self.course)
+        reg["sources"][0]["status"] = "study_pack_generated"
+        save_source_registry(self.course, reg)
+        summary = import_final_audit(
+            "ECA1010_Test",
+            "SRC-0001",
+            audit_text="## Final Verdict\n\nSecond.\n",
+            root=self.root,
+        )
+        self.assertTrue(
+            any("study pack" in w.lower() for w in summary.get("warnings", []))
+        )
+
+    def test_import_allowed_after_study_pack_generated(self) -> None:
+        import_final_audit(
+            "ECA1010_Test", "SRC-0001", audit_text=AUDIT_BODY, root=self.root
+        )
+        from studyforge.core.sources import load_source_registry, save_source_registry
+
+        reg = load_source_registry(self.course)
+        reg["sources"][0]["status"] = "study_pack_generated"
+        save_source_registry(self.course, reg)
+        summary = import_final_audit(
+            "ECA1010_Test",
+            "SRC-0001",
+            audit_text="## Final Verdict\n\nSecond version.\n",
+            root=self.root,
+        )
+        self.assertEqual(summary["audit_id"], "FA-SRC-0001-V002")
+
     def test_not_ready_without_intermediate(self) -> None:
         bad = self.root / "courses" / "BAD"
         bad.mkdir(parents=True)

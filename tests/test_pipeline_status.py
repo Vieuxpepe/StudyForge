@@ -211,18 +211,66 @@ class TestPipelineStatus(unittest.TestCase):
         (digest_dir / "SRC-0001_local_digest_review.json").write_text("{}", encoding="utf-8")
         pack_manifest = self.course / "06_Study_Outputs" / "SRC-0001_study_pack_manifest.json"
         pack_manifest.parent.mkdir(parents=True)
-        pack_manifest.write_text("{}", encoding="utf-8")
+        pack_manifest.write_text(
+            json.dumps({"based_on_final_audit_id": "FA-SRC-0001-V001"}),
+            encoding="utf-8",
+        )
         entry = self._base_entry()
         entry["status"] = "study_pack_generated"
         entry["extracted_text_path"] = str(ext_file.resolve())
         entry["chunk_manifest_path"] = str(manifest.resolve())
         entry["latest_intermediate_audit_path"] = str(ia_file.resolve())
         entry["latest_final_audit_path"] = str(fa_file.resolve())
+        entry["latest_final_audit_id"] = "FA-SRC-0001-V001"
         entry["study_pack_manifest_path"] = str(pack_manifest.resolve())
         self._save_entry(entry)
         status = get_pipeline_status("ECA1010_Test", "SRC-0001", root=self.root)
         self.assertEqual(status["next_action"]["key"], "study_pack_ready")
         self.assertTrue(status["steps"]["study_pack_generated"]["done"])
+        self.assertFalse(any("stale" in w.lower() for w in status["warnings"]))
+
+    def test_stale_study_pack_warning_and_regenerate_action(self) -> None:
+        ext_file = self._write_extraction_artifacts()
+        chunk_manifest = self._write_chunk_manifest()
+        ia_dir = self.course / "04_Intermediate_Audits" / "SRC-0001"
+        fa_dir = self.course / "05_Final_Audits" / "SRC-0001"
+        ia_dir.mkdir(parents=True)
+        fa_dir.mkdir(parents=True)
+        ia_file = ia_dir / "SRC-0001_intermediate_audit_v001.md"
+        fa_file = fa_dir / "SRC-0001_final_audit_v003.md"
+        ia_file.write_text("# IA", encoding="utf-8")
+        fa_file.write_text("# FA v3", encoding="utf-8")
+        digest_dir = self.course / "03_Local_Digests" / "SRC-0001"
+        digest_dir.mkdir(parents=True)
+        (digest_dir / "SRC-0001_combined_local_digest.md").write_text("# c", encoding="utf-8")
+        (digest_dir / "SRC-0001_local_digest_review.json").write_text("{}", encoding="utf-8")
+        pack_manifest = self.course / "06_Study_Outputs" / "SRC-0001_study_pack_manifest.json"
+        pack_manifest.parent.mkdir(parents=True)
+        pack_manifest.write_text(
+            json.dumps({"based_on_final_audit_id": "FA-SRC-0001-V002"}),
+            encoding="utf-8",
+        )
+        entry = self._base_entry()
+        entry["status"] = "study_pack_generated"
+        entry["extracted_text_path"] = str(ext_file.resolve())
+        entry["chunk_manifest_path"] = str(chunk_manifest.resolve())
+        entry["latest_intermediate_audit_path"] = str(ia_file.resolve())
+        entry["latest_final_audit_path"] = str(fa_file.resolve())
+        entry["latest_final_audit_id"] = "FA-SRC-0001-V003"
+        entry["study_pack_manifest_path"] = str(pack_manifest.resolve())
+        self._save_entry(entry)
+        status = get_pipeline_status("ECA1010_Test", "SRC-0001", root=self.root)
+        self.assertTrue(status["steps"]["study_pack_generated"]["done"])
+        self.assertTrue(
+            any(
+                "stale" in w.lower()
+                and "FA-SRC-0001-V002" in w
+                and "FA-SRC-0001-V003" in w
+                for w in status["warnings"]
+            )
+        )
+        self.assertEqual(status["next_action"]["key"], "generate_study_pack")
+        self.assertEqual(status["next_action"]["label"], "Regenerate study pack")
 
     def test_missing_files_warn(self) -> None:
         entry = self._base_entry()

@@ -24,7 +24,11 @@ _AUDIT_FILE_PATTERN = re.compile(
 )
 
 _ALLOWED_STATUSES = frozenset(
-    {"intermediate_audit_imported", "final_audit_imported"}
+    {
+        "intermediate_audit_imported",
+        "final_audit_imported",
+        "study_pack_generated",
+    }
 )
 
 
@@ -186,11 +190,11 @@ def import_final_audit(
     normalized_id = _normalize_source_id(entry["id"])
     title = entry.get("title", normalized_id)
 
-    status = entry.get("status", "")
-    if status not in _ALLOWED_STATUSES:
+    prior_status = str(entry.get("status", ""))
+    if prior_status not in _ALLOWED_STATUSES:
         raise FinalAuditNotReadyError(
             f"Source {normalized_id} is not ready for final audit import "
-            f"(status: {status!r}). Import an intermediate audit first."
+            f"(status: {prior_status!r}). Import an intermediate audit first."
         )
 
     content = _read_audit_content(audit_text, audit_file)
@@ -201,6 +205,12 @@ def import_final_audit(
     registry_path = get_final_audit_registry_path(course_path, normalized_id)
 
     warnings: list[str] = []
+    if prior_status == "study_pack_generated":
+        warnings.append(
+            "A study pack already exists for this source. Registry status will be "
+            "final_audit_imported until you regenerate the study pack with --overwrite. "
+            "Existing study pack files may be out of date until then."
+        )
     registry = load_final_audit_registry(registry_path, normalized_id)
 
     if not registry_path.is_file() and _scan_versions_on_disk(audit_dir, normalized_id):
@@ -225,6 +235,12 @@ def import_final_audit(
     audit_path.write_text(content, encoding="utf-8")
     imported_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     audit_id = build_final_audit_id(normalized_id, version)
+
+    from studyforge.study.study_pack import get_final_audit_template_warning
+
+    template_warning = get_final_audit_template_warning(content)
+    if template_warning:
+        warnings.append(template_warning)
 
     registry_entry = {
         "version": version,

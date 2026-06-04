@@ -43,6 +43,26 @@ _SECTION_HEADINGS = {
 
 _MISSING_SECTION = "Not found in final audit."
 
+IMPORTANT_SECTION_KEYS = (
+    "must_memorize",
+    "must_understand",
+    "formula_sheet",
+    "practice_questions",
+    "active_recall",
+)
+
+_MIN_PLACEHOLDER_WORDS = 10
+_MIN_TOTAL_WORDS_FAILED = 100
+_MIN_MISSING_SECTIONS_FAILED = 6
+_MIN_MISSING_SECTIONS_NEEDS_REVIEW = 3
+_MIN_TEMPLATE_HEADINGS = 3
+
+NORMALIZER_SUGGESTION = (
+    "Final audit headings may not match StudyForge's expected template. "
+    "Try `python scripts/normalize_final_audit.py --course <course> --source-id <id>` "
+    "or use the GUI Final Audit Normalizer."
+)
+
 
 class FinalAuditNotFoundError(Exception):
     """Raised when no final audit exists for the source."""
@@ -110,6 +130,165 @@ def extract_sections(text: str) -> dict[str, str]:
         body = extract_markdown_section(text, heading)
         sections[key] = body if body else _MISSING_SECTION
     return sections
+
+
+def _section_word_count(body: str) -> int:
+    if not body or body == _MISSING_SECTION:
+        return 0
+    return len(body.split())
+
+
+def _is_section_missing(body: str) -> bool:
+    return not body.strip() or body.strip() == _MISSING_SECTION
+
+
+def analyze_study_pack_sections(sections: dict[str, str]) -> dict:
+    """
+    Score extracted final-audit sections for study pack usefulness.
+
+    Returns found/missing/placeholder lists, word counts, quality_status, warnings.
+    """
+    found_sections: list[str] = []
+    missing_sections: list[str] = []
+    placeholder_sections: list[str] = []
+    section_word_counts: dict[str, int] = {}
+    warnings: list[str] = []
+
+    for key in _SECTION_HEADINGS:
+        body = sections.get(key, _MISSING_SECTION)
+        count = _section_word_count(body)
+        section_word_counts[key] = count
+
+        if _is_section_missing(body):
+            missing_sections.append(key)
+            continue
+
+        found_sections.append(key)
+        if count < _MIN_PLACEHOLDER_WORDS:
+            placeholder_sections.append(key)
+            warnings.append(
+                f"Section '{_SECTION_HEADINGS[key]}' has only {count} words "
+                f"(may be too thin for study use)."
+            )
+
+    total_extracted_words = sum(section_word_counts.values())
+    missing_count = len(missing_sections)
+    important_missing = [
+        key for key in IMPORTANT_SECTION_KEYS if key in missing_sections
+    ]
+
+    for key in important_missing:
+        warnings.append(
+            f"Missing important section: {key} ({_SECTION_HEADINGS[key]})"
+        )
+
+    if total_extracted_words < _MIN_TOTAL_WORDS_FAILED:
+        warnings.append(
+            f"Only {total_extracted_words} words extracted from the final audit "
+            f"(under {_MIN_TOTAL_WORDS_FAILED})."
+        )
+
+    if missing_count >= _MIN_MISSING_SECTIONS_FAILED:
+        warnings.append(
+            f"{missing_count} of {len(_SECTION_HEADINGS)} expected sections are missing."
+        )
+
+    quality_status = "ok"
+    if (
+        total_extracted_words < _MIN_TOTAL_WORDS_FAILED
+        or missing_count >= _MIN_MISSING_SECTIONS_FAILED
+    ):
+        quality_status = "failed"
+        warnings.insert(
+            0,
+            "Study pack quality is poor — re-export or fix the final audit template.",
+        )
+    elif (
+        missing_count >= _MIN_MISSING_SECTIONS_NEEDS_REVIEW
+        or important_missing
+    ):
+        quality_status = "needs_review"
+        warnings.append(
+            "Study pack generated from limited final audit content."
+        )
+
+    if quality_status in {"needs_review", "failed"}:
+        if NORMALIZER_SUGGESTION not in warnings:
+            warnings.append(NORMALIZER_SUGGESTION)
+
+    deduped_final: list[str] = []
+    for warning in warnings:
+        if warning not in deduped_final:
+            deduped_final.append(warning)
+
+    return {
+        "found_sections": found_sections,
+        "missing_sections": missing_sections,
+        "placeholder_sections": placeholder_sections,
+        "section_word_counts": section_word_counts,
+        "total_extracted_words": total_extracted_words,
+        "quality_status": quality_status,
+        "warnings": deduped_final,
+    }
+
+
+def count_final_audit_headings_in_text(text: str) -> int:
+    """Count how many expected final-audit section headings were found."""
+    sections = extract_sections(text)
+    return sum(1 for body in sections.values() if not _is_section_missing(body))
+
+
+def get_final_audit_template_warning(text: str) -> str | None:
+    """
+    Warn if imported final audit may not match the expected template.
+
+    Returns None if enough headings were detected.
+    """
+    count = count_final_audit_headings_in_text(text)
+    if count < _MIN_TEMPLATE_HEADINGS:
+        return (
+            "Final audit may not follow expected template. "
+            f"Only {count} of {len(_SECTION_HEADINGS)} expected headings were found. "
+            "Study pack generation may be weak."
+        )
+    return None
+
+
+def diagnose_study_pack(
+    course_name: str,
+    source_id: str,
+    root: Path | None = None,
+) -> dict:
+    """
+    Load latest final audit, extract sections, and return quality analysis only.
+
+    Does not write study pack files or update the registry.
+    """
+    course_path = resolve_course_path(course_name, root)
+    entry = find_source_by_id(course_name, source_id, root)
+    normalized_id = _normalize_source_id(entry["id"])
+    title = entry.get("title", normalized_id)
+
+    final_audit = get_latest_final_audit(course_path, normalized_id)
+    audit_entry = final_audit["entry"]
+    audit_id = str(audit_entry.get("audit_id", "unknown"))
+    sections = extract_sections(final_audit["text"])
+    quality = analyze_study_pack_sections(sections)
+    template_warning = get_final_audit_template_warning(final_audit["text"])
+
+    warnings = list(quality.get("warnings", []))
+    if template_warning and template_warning not in warnings:
+        warnings.insert(0, template_warning)
+
+    return {
+        "course": course_path.name,
+        "source_id": normalized_id,
+        "title": title,
+        "based_on_final_audit_id": audit_id,
+        "final_audit_path": final_audit["file_path"],
+        "quality": quality,
+        "warnings": warnings,
+    }
 
 
 def _find_latest_audit_on_disk(audit_dir: Path, source_id: str) -> dict | None:
@@ -572,10 +751,13 @@ def generate_study_pack(
             + "\nUse --overwrite to replace."
         )
 
-    warnings: list[str] = []
-    for key, body in sections.items():
-        if body == _MISSING_SECTION:
-            warnings.append(f"Section missing in final audit: {_SECTION_HEADINGS[key]}")
+    quality = analyze_study_pack_sections(sections)
+    warnings: list[str] = list(quality.get("warnings", []))
+    for key in quality.get("missing_sections", []):
+        label = _SECTION_HEADINGS.get(key, key)
+        line = f"Section missing in final audit: {label}"
+        if line not in warnings:
+            warnings.append(line)
 
     for directory in {
         paths["study_guides"].parent,
@@ -621,6 +803,7 @@ def generate_study_pack(
             "weak_points_seed": written["weak_points"],
         },
         "warnings": warnings,
+        "quality": quality,
     }
 
     with paths["manifest"].open("w", encoding="utf-8") as handle:
@@ -653,5 +836,7 @@ def generate_study_pack(
         "manifest_path": str(paths["manifest"].resolve()),
         "outputs": manifest["outputs"],
         "warnings": warnings,
+        "quality": quality,
+        "quality_status": quality["quality_status"],
         "status": "study_pack_generated",
     }

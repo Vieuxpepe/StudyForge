@@ -24,7 +24,10 @@ Work through one source end-to-end on your machine.
 - [ ] Run/import intermediate audit
 - [ ] Export final audit packet
 - [ ] Run/import final audit
-- [ ] Generate study pack
+- [ ] If study pack diagnose quality is weak, run **Final Audit Normalizer** on **Audits** (or `normalize_final_audit.py`)
+- [ ] Optional: export repair packet and re-import a manually fixed final audit
+- [ ] Run study pack `--diagnose-only` (or GUI **Diagnose final audit only**)
+- [ ] Generate study pack and confirm quality status is not `failed`
 - [ ] Open final study guide
 - [ ] Open flashcards
 - [ ] Open practice quiz
@@ -59,7 +62,7 @@ Work through one source end-to-end on your machine.
 | Guided next step | **Pipeline** → **Guided Workflow** |
 | Extract / chunk / digest / review | **Pipeline** (manual controls) |
 | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
-| Intermediate/final audits | **Audits** |
+| Intermediate/final audits, normalizer | **Audits** |
 | Active recall practice | **Active Recall** |
 | Mistakes / weak points | **Review Tracker** |
 | LM Studio URL / tokens | **Pipeline** |
@@ -68,6 +71,13 @@ Work through one source end-to-end on your machine.
 ## CLI equivalent (optional)
 
 See `README.md` — **Quick CLI end-to-end workflow** for the full command sequence.
+
+Final audit normalizer (if headings do not match template):
+
+```bash
+python scripts/normalize_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001
+python scripts/normalize_final_audit.py --course ECA1010_Microeconomics --source-id SRC-0001 --import-as-new-version --overwrite
+```
 
 Study pack (after final audit import):
 

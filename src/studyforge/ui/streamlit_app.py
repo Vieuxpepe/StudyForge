@@ -4,11 +4,18 @@ StudyForge Streamlit GUI — wraps existing CLI backend functions.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
 import streamlit as st
 
+from studyforge.audits.final_audit_normalizer import (
+    NormalizedAuditExistsError,
+    RepairPacketExistsError,
+    build_final_audit_repair_packet,
+    normalize_latest_final_audit,
+)
 from studyforge.audits.final_import import import_final_audit
 from studyforge.audits.final_packet import build_final_audit_packet
 from studyforge.audits.intermediate_import import import_intermediate_audit
@@ -63,6 +70,8 @@ from studyforge.study.mistakes import (
 from studyforge.study.study_pack import (
     FinalAuditNotFoundError,
     StudyPackOutputExistsError,
+    _SECTION_HEADINGS,
+    diagnose_study_pack,
     generate_study_pack,
 )
 from studyforge.study.review_planner import (
@@ -353,6 +362,52 @@ def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
     return status
 
 
+def _render_study_pack_quality(quality: dict | None, extra_warnings: list | None = None) -> None:
+    """Show study pack quality banner from manifest or generation result."""
+    if not quality:
+        return
+    status = quality.get("quality_status", "unknown")
+    warnings = list(quality.get("warnings") or [])
+    if extra_warnings:
+        for warning in extra_warnings:
+            if warning not in warnings:
+                warnings.append(warning)
+
+    if status == "ok":
+        st.success(
+            "Study pack quality looks good — expected sections were found in the final audit."
+        )
+    elif status == "needs_review":
+        st.warning(
+            "Study pack generated, but content may be thin. Review missing sections "
+            "before relying on flashcards and quizzes. Try normalizing the final audit "
+            "or export a repair packet on Audits, then regenerate the study pack."
+        )
+    else:
+        st.error(
+            "Study pack was created, but the final audit had very little usable content. "
+            "Try the Final Audit Normalizer on Audits or export a repair packet, then "
+            "re-import and regenerate the study pack."
+        )
+
+    missing = quality.get("missing_sections") or []
+    if missing:
+        labels = [f"{k} ({_SECTION_HEADINGS.get(k, k)})" for k in missing]
+        st.write("**Missing sections:** " + ", ".join(labels))
+
+    thin = quality.get("placeholder_sections") or []
+    if thin:
+        labels = [f"{k} ({_SECTION_HEADINGS.get(k, k)})" for k in thin]
+        st.write("**Thin sections:** " + ", ".join(labels))
+
+    st.write(f"**Total extracted words:** {quality.get('total_extracted_words', 0)}")
+
+    if warnings:
+        st.write("**Quality warnings**")
+        for warning in warnings:
+            st.write(f"- {warning}")
+
+
 def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict | None) -> None:
     """Generate and preview study pack outputs from the latest final audit."""
     st.subheader("Study Pack")
@@ -374,7 +429,28 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
         key=f"study_pack_overwrite_{source_id}",
     )
 
-    if st.button("Generate study pack", key=f"gen_study_pack_{source_id}"):
+    col_gen, col_diag = st.columns(2)
+    with col_diag:
+        if st.button("Diagnose final audit only", key=f"diag_study_pack_{source_id}"):
+            try:
+                report = diagnose_study_pack(course_name, source_id)
+                st.session_state[f"study_pack_diag_{source_id}"] = report
+            except FinalAuditNotFoundError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    diag_report = st.session_state.get(f"study_pack_diag_{source_id}")
+    if diag_report:
+        st.caption("Diagnostic preview (no files written)")
+        _render_study_pack_quality(
+            diag_report.get("quality"),
+            diag_report.get("warnings"),
+        )
+
+    with col_gen:
+        run_generate = st.button("Generate study pack", key=f"gen_study_pack_{source_id}")
+    if run_generate:
         try:
             with st.spinner("Generating study pack…"):
                 summary = generate_study_pack(
@@ -383,6 +459,7 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
                     overwrite=pack_overwrite,
                 )
             st.session_state.pop(f"pipeline_status_{source_id}", None)
+            _render_study_pack_quality(summary.get("quality"), summary.get("warnings"))
             _show_result_summary("Study pack generated", summary)
             st.rerun()
         except StudyPackOutputExistsError as exc:
@@ -417,6 +494,21 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
     st.write("**Study pack outputs**")
     for label, path_str in existing:
         st.write(f"- **{label}:** `{path_str}`")
+
+    manifest_path = entry.get("study_pack_manifest_path")
+    if manifest_path and Path(manifest_path).is_file():
+        try:
+            manifest_data = json.loads(
+                Path(manifest_path).read_text(encoding="utf-8")
+            )
+            if manifest_data.get("quality"):
+                st.write("**Saved pack quality (from manifest)**")
+                _render_study_pack_quality(
+                    manifest_data["quality"],
+                    manifest_data.get("warnings"),
+                )
+        except (OSError, json.JSONDecodeError):
+            pass
 
     preview_labels = [p[0] for p in existing if p[0] != "Manifest"]
     preview_map = {p[0]: p[1] for p in existing if p[0] != "Manifest"}
@@ -825,6 +917,90 @@ def page_audits(course_name: str | None) -> None:
                 st.rerun()
             except Exception as exc:
                 _show_exception(exc)
+
+    st.subheader("Final Audit Normalizer")
+    st.caption(
+        "Map messy final audit headings to the exact StudyForge template (no AI). "
+        "Use before generating a study pack if diagnostics report weak quality."
+    )
+    fa_norm_overwrite = st.checkbox(
+        "Overwrite normalizer outputs",
+        value=False,
+        key=f"fa_norm_overwrite_{source_id}",
+    )
+    ncol1, ncol2, ncol3 = st.columns(3)
+    with ncol1:
+        if st.button("Diagnose / normalize", key=f"fa_norm_{source_id}"):
+            try:
+                summary = normalize_latest_final_audit(
+                    course_name,
+                    source_id,
+                    overwrite=fa_norm_overwrite,
+                )
+                st.session_state[f"fa_norm_result_{source_id}"] = summary
+                st.rerun()
+            except (NormalizedAuditExistsError, FinalAuditNotFoundError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+    with ncol2:
+        if st.button("Normalize & import new version", key=f"fa_norm_import_{source_id}"):
+            try:
+                summary = normalize_latest_final_audit(
+                    course_name,
+                    source_id,
+                    overwrite=fa_norm_overwrite,
+                    import_as_new_version=True,
+                )
+                st.session_state[f"fa_norm_result_{source_id}"] = summary
+                st.session_state.pop(f"pipeline_status_{source_id}", None)
+                st.rerun()
+            except (NormalizedAuditExistsError, FinalAuditNotFoundError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+    with ncol3:
+        if st.button("Export repair packet", key=f"fa_repair_{source_id}"):
+            try:
+                summary = build_final_audit_repair_packet(
+                    course_name,
+                    source_id,
+                    overwrite=fa_norm_overwrite,
+                )
+                st.success(f"Repair packet: `{summary['repair_packet_path']}`")
+            except (RepairPacketExistsError, FinalAuditNotFoundError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    norm_result = st.session_state.get(f"fa_norm_result_{source_id}")
+    if norm_result:
+        status = norm_result.get("quality_status", "unknown")
+        if status == "ok":
+            st.success(f"Normalization quality: {status}")
+        elif status == "needs_review":
+            st.warning(f"Normalization quality: {status}")
+        else:
+            st.error(f"Normalization quality: {status}")
+        st.write(f"**Mapped:** {norm_result.get('mapped_count', 0)} headings")
+        if norm_result.get("missing_headings"):
+            st.write(
+                "**Missing:** "
+                + ", ".join(norm_result["missing_headings"][:8])
+            )
+        for warning in norm_result.get("warnings") or []:
+            st.caption(warning)
+        if norm_result.get("normalized_path"):
+            path = Path(norm_result["normalized_path"])
+            if path.is_file():
+                st.text_area(
+                    "Normalized preview",
+                    read_text_preview(path, max_chars=6000),
+                    height=200,
+                    key=f"fa_norm_preview_{source_id}",
+                )
+        if norm_result.get("imported_audit_id"):
+            st.info(f"Imported as {norm_result['imported_audit_id']}")
 
     st.subheader("Final audit")
     if st.button("Export final audit packet"):
