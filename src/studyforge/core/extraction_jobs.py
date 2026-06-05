@@ -177,7 +177,19 @@ def extract_registered_source(
     )
     save_source_registry(course_path, registry)
 
-    warnings = metadata.get("warnings", [])
+    from studyforge.extraction.extraction_quality import run_extraction_quality_check
+
+    quality_summary = run_extraction_quality_check(
+        course_name,
+        normalized_id,
+        root=root,
+    )
+
+    warnings = list(metadata.get("warnings", []))
+    for warning in quality_summary.get("warnings", []):
+        if warning not in warnings:
+            warnings.append(warning)
+
     return {
         "course": course_path.name,
         "source_id": normalized_id,
@@ -187,5 +199,7 @@ def extract_registered_source(
         "total_characters": metadata["total_characters"],
         "extracted_text_path": str(text_out.resolve()),
         "extraction_log_path": str(log_out.resolve()),
+        "extraction_quality_status": quality_summary.get("quality_status"),
+        "extraction_quality_report_path": quality_summary.get("report_json_path"),
         "warnings": warnings,
     }

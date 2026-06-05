@@ -7,13 +7,18 @@ Work through one source end-to-end on your machine.
 
 - [ ] Launch GUI
 - [ ] Open **Today** page and confirm summary counts match your course data
+- [ ] Optional: open **Course Quality** page or run `course_quality.py --export`; confirm source health table and recommendations
+- [ ] Optional: open **Evidence Trace** for a chunked source; inspect source chunk, digest chunk, and audit mentions
 - [ ] Create/select course
-- [ ] Optional: create course backup (`python scripts/backup_course.py --course YourCourse` or **Courses** → **Course backup**); confirm zip under `08_App_Data/exports/backups/`; restore is manual in v1
+- [ ] Optional: create course backup (`python scripts/backup_course.py --course YourCourse` or **Courses** → **Course backup**); confirm zip under `08_App_Data/exports/backups/`
+- [ ] Optional: verify backup (`python scripts/verify_backup.py --file path\to\backup.zip` or **Courses** → **Backup verification**); preview restore; safe restore to new folder only (`--restore-as`); existing courses are never overwritten in v1
 - [ ] Upload/register a real PDF
 - [ ] Confirm source appears in dashboard
 - [ ] Try **Run next recommended step** on Pipeline (Guided Workflow) for one step
 - [ ] Confirm Pipeline Doctor updates after the guided step
 - [ ] Extract PDF
+- [ ] Confirm extraction quality report exists (`02_Extracted_Text/extraction_logs/SRC-0001_extraction_quality_report.json`) or run **Pipeline** → **Extraction Quality** / `check_extraction_quality.py`
+- [ ] If quality is `needs_review` or `failed`, inspect flagged pages before chunking
 - [ ] Open extracted text preview
 - [ ] Chunk source
 - [ ] Confirm chunk manifest exists
@@ -70,11 +75,15 @@ Work through one source end-to-end on your machine.
 | Step | Where in GUI |
 |------|----------------|
 | What to study today | **Today** |
+| Course trust/readiness across sources | **Course Quality** |
+| Evidence chain inspection | **Evidence Trace** |
 | Course | Sidebar + **Courses** |
 | Course backup | **Courses** → **Course backup** |
+| Backup verify / safe restore | **Courses** → **Backup verification** |
 | Source PDF | **Sources** |
 | Guided next step | **Pipeline** → **Guided Workflow** |
 | Extract / chunk / digest / review | **Pipeline** (manual controls) |
+| Extraction quality check | **Pipeline** → **Extraction Quality** |
 | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
 | Intermediate/final audits, normalizer | **Audits** |
 | Active recall practice | **Active Recall** |

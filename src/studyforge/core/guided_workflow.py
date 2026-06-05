@@ -115,6 +115,18 @@ def _normalize_guided_action(
             "Guided step exports the packet only. Paste/import the final audit "
             "on the Audits page."
         )
+    elif key == "chunk_source":
+        quality = pipeline_status.get("extraction_quality_status")
+        if quality == "failed":
+            warning = (
+                "Extraction quality failed. Inspect the extraction report "
+                "before chunking."
+            )
+        elif quality == "needs_review":
+            warning = (
+                "Extraction quality needs review. Some pages may be empty "
+                "or low-text."
+            )
 
     return {
         "key": key,

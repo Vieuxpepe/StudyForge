@@ -122,6 +122,16 @@ class TestExtractionJobs(unittest.TestCase):
         self.assertIn("extraction_log_path", entry)
         self.assertIn("date_extracted", entry)
 
+    def test_extraction_includes_quality_summary(self) -> None:
+        summary = extract_registered_source("ECA1010_Test", "SRC-0001", root=self.root)
+        self.assertIn("extraction_quality_status", summary)
+        self.assertIn("extraction_quality_report_path", summary)
+        entry = load_source_registry(self.course)["sources"][0]
+        self.assertIn(
+            entry["extraction_quality_status"],
+            ("ok", "needs_review", "failed"),
+        )
+
 
 class TestPdfExtractorValidation(unittest.TestCase):
     def test_non_pdf_raises(self) -> None:

@@ -28,6 +28,7 @@ from studyforge.core.digest_jobs import (
     run_local_digest_for_source,
 )
 from studyforge.core.extraction_jobs import extract_registered_source
+from studyforge.extraction.extraction_quality import run_extraction_quality_check
 from studyforge.core.intermediate_audit_jobs import run_intermediate_audit_for_source
 from studyforge.core.guided_workflow import (
     UnsupportedGuidedActionError,
@@ -44,6 +45,13 @@ from studyforge.core.backup import (
     format_bytes,
     list_course_backups,
 )
+from studyforge.core.backup_restore import (
+    InvalidBackupError,
+    RestoreTargetExistsError,
+    preview_restore_backup,
+    restore_backup_to_new_course,
+    verify_backup,
+)
 from studyforge.core.sources import add_source, list_sources, resolve_course_path
 from studyforge.llm.google_genai_client import (
     DEFAULT_GEMMA_4_26B_MODEL,
@@ -54,7 +62,17 @@ from studyforge.llm.lm_studio_client import (
     check_lm_studio_connection,
     choose_default_model,
 )
-from studyforge.study.digest_review import review_local_digest_for_source
+from studyforge.study.course_quality import (
+    export_course_quality_report,
+    get_course_quality_report,
+    get_course_quality_report_paths,
+)
+from studyforge.study.evidence_trace import (
+    export_chunk_trace,
+    get_chunk_trace,
+    get_source_trace_summary,
+    list_source_chunks,
+)
 from studyforge.study.active_recall import (
     ActiveRecallNotReadyError,
     InvalidGradeError,
@@ -112,6 +130,7 @@ from studyforge.study.study_session import (
     record_session_item_result,
     start_study_session,
 )
+from studyforge.study.digest_review import review_local_digest_for_source
 from studyforge.study.today_dashboard import export_today_dashboard, get_today_dashboard
 from studyforge.study.weak_points import (
     InvalidConfidenceError,
@@ -127,6 +146,8 @@ from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_
 NAV_PAGES = [
     "Today",
     "Dashboard",
+    "Course Quality",
+    "Evidence Trace",
     "Courses",
     "Sources",
     "Pipeline",
@@ -397,6 +418,76 @@ def _render_pipeline_doctor(course_name: str, source_id: str) -> dict | None:
             st.warning(f"⚠️ {warning}")
 
     return status
+
+
+def _render_extraction_quality(course_name: str, source_id: str) -> None:
+    """Show extraction quality status and run manual quality checks."""
+    from studyforge.core.extraction_jobs import find_source_by_id
+
+    st.subheader("Extraction Quality")
+    st.caption(
+        "Deterministic check for empty/low-text pages and suspicious extraction "
+        "artifacts. No OCR or AI."
+    )
+
+    try:
+        entry = find_source_by_id(course_name, source_id)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    quality_status = entry.get("extraction_quality_status")
+    report_json = entry.get("extraction_quality_report_path")
+    if quality_status:
+        if quality_status == "failed":
+            st.error(f"Quality status: **{quality_status}**")
+        elif quality_status == "needs_review":
+            st.warning(f"Quality status: **{quality_status}**")
+        else:
+            st.success(f"Quality status: **{quality_status}**")
+
+    if st.button("Run extraction quality check", key=f"quality_check_{source_id}"):
+        try:
+            with st.spinner("Analyzing extraction quality…"):
+                report = run_extraction_quality_check(course_name, source_id)
+            st.session_state[f"quality_report_{source_id}"] = report
+            st.session_state.pop(f"pipeline_status_{source_id}", None)
+            st.rerun()
+        except Exception as exc:
+            _show_exception(exc)
+            return
+
+    report = st.session_state.get(f"quality_report_{source_id}")
+    if report is None and report_json and Path(report_json).is_file():
+        try:
+            report = json.loads(Path(report_json).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            report = None
+
+    if report:
+        st.write(f"**Pages:** {report.get('total_pages', 0)}")
+        st.write(f"**Words:** {report.get('total_words', 0)}")
+        st.write(f"**Average words/page:** {report.get('average_words_per_page', 0)}")
+        empty_pages = report.get("empty_pages") or []
+        low_pages = report.get("low_word_pages") or []
+        if empty_pages:
+            st.write(f"**Empty pages:** {', '.join(str(p) for p in empty_pages)}")
+        if low_pages:
+            st.write(f"**Low-word pages:** {', '.join(str(p) for p in low_pages)}")
+        for warning in report.get("warnings") or []:
+            st.warning(warning)
+
+    md_path = None
+    if report:
+        md_path = report.get("report_markdown_path")
+    if not md_path and report_json:
+        md_candidate = Path(report_json).with_suffix(".md")
+        if md_candidate.is_file():
+            md_path = str(md_candidate)
+
+    if md_path and Path(md_path).is_file():
+        with st.expander("Preview Markdown report"):
+            st.text(Path(md_path).read_text(encoding="utf-8"))
 
 
 def _render_study_pack_quality(quality: dict | None, extra_warnings: list | None = None) -> None:
@@ -760,6 +851,225 @@ def page_today(course_name: str | None) -> None:
             st.warning(warning)
 
 
+def page_course_quality(course_name: str | None) -> None:
+    st.header("Course Quality")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Trust/readiness across all sources — deterministic checks only. "
+        "Does not replace final audit or active recall."
+    )
+
+    col_refresh, col_export = st.columns(2)
+    with col_refresh:
+        refresh = st.button("Refresh quality report", key="course_quality_refresh")
+    with col_export:
+        export = st.button("Export report", key="course_quality_export")
+
+    try:
+        if export:
+            result = export_course_quality_report(course_name)
+            st.session_state.course_quality_report = result["report"]
+            st.success("Report exported.")
+            st.code(result.get("report_markdown_path", ""))
+        elif refresh or "course_quality_report" not in st.session_state:
+            st.session_state.course_quality_report = get_course_quality_report(
+                course_name
+            )
+
+        report = st.session_state.get("course_quality_report")
+        if not report:
+            return
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Sources", report.get("source_count", 0))
+        c2.metric("Ready", report.get("ready_count", 0))
+        c3.metric("Needs review", report.get("needs_review_count", 0))
+        c4.metric("Failed", report.get("failed_count", 0))
+
+        rows = []
+        for source in report.get("sources") or []:
+            scores = source.get("scores") or {}
+            action = source.get("recommended_action") or {}
+            rows.append(
+                {
+                    "source_id": source.get("source_id"),
+                    "title": source.get("title"),
+                    "status": source.get("quality_status"),
+                    "extraction": scores.get("extraction"),
+                    "digest": scores.get("local_digest"),
+                    "int_audit": scores.get("intermediate_audit"),
+                    "final_audit": scores.get("final_audit"),
+                    "study_pack": scores.get("study_pack"),
+                    "activity": scores.get("study_activity"),
+                    "next_action": action.get("label"),
+                }
+            )
+        if rows:
+            st.dataframe(rows, use_container_width=True)
+        else:
+            st.info("No sources registered for this course.")
+
+        warnings = report.get("top_warnings") or []
+        needs_attention = (
+            int(report.get("needs_review_count", 0)) > 0
+            or int(report.get("failed_count", 0)) > 0
+        )
+        if warnings:
+            st.subheader("Warnings")
+            for warning in warnings:
+                st.warning(warning)
+        if needs_attention:
+            st.info(
+                "Use **Evidence Trace** to inspect source chunks, digests, and audits."
+            )
+
+        actions = report.get("recommended_next_actions") or []
+        if actions:
+            st.subheader("Course recommendations")
+            for action in actions:
+                sources_text = ", ".join(action.get("source_ids") or [])
+                st.write(f"- **{action.get('label', '')}** ({sources_text})")
+
+        course_path = resolve_course_path(course_name)
+        _, md_path = get_course_quality_report_paths(course_path)
+        if md_path.is_file():
+            with st.expander("Preview exported Markdown report"):
+                st.text(md_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _show_exception(exc)
+
+
+def page_evidence_trace(course_name: str | None) -> None:
+    st.header("Evidence Trace")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Inspect the evidence chain: source chunk → local digest → audits → study pack. "
+        "Deterministic string matching only (no AI, no semantic search)."
+    )
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="evidence_trace_source")
+    if not source_id:
+        return
+
+    try:
+        summary = get_source_trace_summary(course_name, source_id)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.subheader("Source Trace Summary")
+    st.write(f"**{summary.get('source_id')}** — {summary.get('title', '')}")
+    st.write(f"Registry status: `{summary.get('registry_status', '')}`")
+
+    artifacts = summary.get("available_artifacts") or {}
+    cols = st.columns(5)
+    artifact_keys = list(artifacts.keys())
+    for index, key in enumerate(artifact_keys):
+        cols[index % 5].write(f"{'✅' if artifacts[key] else '⏳'} {key.replace('_', ' ')}")
+
+    paths = summary.get("paths") or {}
+    with st.expander("Important paths"):
+        for key, value in paths.items():
+            if value:
+                st.write(f"**{key}:** `{value}`")
+
+    for warning in summary.get("warnings") or []:
+        st.warning(warning)
+
+    st.subheader("Chunk Viewer")
+    chunks = list_source_chunks(course_name, source_id)
+    if not chunks:
+        st.info("No chunks found. Chunk the source on the Pipeline page first.")
+        return
+
+    labels = [
+        f"{chunk['chunk_id']} — pages {chunk.get('page_start')}–{chunk.get('page_end')} — "
+        f"{chunk.get('word_count', 0)} words"
+        for chunk in chunks
+    ]
+    chunk_ids = [chunk["chunk_id"] for chunk in chunks]
+    selected_index = st.selectbox(
+        "Select chunk",
+        range(len(labels)),
+        format_func=lambda i: labels[i],
+        key=f"evidence_chunk_{source_id}",
+    )
+    selected_chunk_id = chunk_ids[selected_index]
+
+    try:
+        trace = get_chunk_trace(course_name, source_id, selected_chunk_id)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    tab_source, tab_digest, tab_review, tab_ia, tab_fa, tab_export = st.tabs(
+        [
+            "Source Chunk",
+            "Local Digest Chunk",
+            "Digest Review Mentions",
+            "Intermediate Audit Mentions",
+            "Final Audit Mentions",
+            "Export",
+        ]
+    )
+
+    source_chunk = trace.get("source_chunk") or {}
+    digest_chunk = trace.get("local_digest_chunk") or {}
+
+    with tab_source:
+        st.caption(source_chunk.get("path", ""))
+        st.text_area(
+            "Source chunk",
+            read_text_preview(Path(source_chunk.get("path", "")), max_chars=12000)
+            if source_chunk.get("exists")
+            else "(missing)",
+            height=400,
+            key=f"evidence_source_{selected_chunk_id}",
+        )
+
+    with tab_digest:
+        st.caption(digest_chunk.get("path", ""))
+        st.text_area(
+            "Local digest chunk",
+            read_text_preview(Path(digest_chunk.get("path", "")), max_chars=12000)
+            if digest_chunk.get("exists")
+            else "(missing)",
+            height=400,
+            key=f"evidence_digest_{selected_chunk_id}",
+        )
+
+    def _render_mentions(mentions: list[dict]) -> None:
+        if not mentions:
+            st.write("No mentions found.")
+            return
+        for mention in mentions:
+            st.write(f"**Line {mention.get('line_number', '?')}:** `{mention.get('match_line', '')}`")
+            st.text(mention.get("snippet", ""))
+
+    with tab_review:
+        _render_mentions(trace.get("digest_review_mentions") or [])
+
+    with tab_ia:
+        _render_mentions(trace.get("intermediate_audit_mentions") or [])
+
+    with tab_fa:
+        _render_mentions(trace.get("final_audit_mentions") or [])
+
+    with tab_export:
+        if st.button("Export evidence trace", key=f"evidence_export_{selected_chunk_id}"):
+            try:
+                path = export_chunk_trace(course_name, source_id, selected_chunk_id)
+                st.success(f"Exported to `{path}`")
+                st.text(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                _show_exception(exc)
+
+
 def page_dashboard(course_name: str | None) -> None:
     st.header("Dashboard")
     if not course_name:
@@ -905,6 +1215,127 @@ def page_courses() -> None:
             except Exception as exc:
                 _show_exception(exc)
 
+    st.subheader("Backup verification")
+    st.warning(
+        "Restore never overwrites existing course folders in v1. "
+        "Backup zips may contain private course PDFs, extracted text, audits, and study logs."
+    )
+    verify_upload = st.file_uploader(
+        "Upload backup zip to verify or restore",
+        type=["zip"],
+        key="backup_verify_upload",
+    )
+    verify_path_text = st.text_input(
+        "Or enter backup zip path",
+        value="",
+        key="backup_verify_path",
+    )
+    restore_as_name = st.text_input(
+        "Restore as course folder (optional new name)",
+        value="",
+        key="backup_restore_as",
+        placeholder="ECA1010_Restored_Test",
+    )
+
+    def _resolve_backup_path() -> Path | None:
+        if verify_upload is not None:
+            temp_path = Path(tempfile.gettempdir()) / f"studyforge_verify_{verify_upload.name}"
+            temp_path.write_bytes(verify_upload.getvalue())
+            return temp_path
+        if verify_path_text.strip():
+            return Path(verify_path_text.strip())
+        return None
+
+    col_verify, col_preview, col_restore = st.columns(3)
+    with col_verify:
+        if st.button("Verify backup", key="backup_verify_btn"):
+            backup_file = _resolve_backup_path()
+            if backup_file is None:
+                st.error("Upload a zip or enter a backup path first.")
+            elif not backup_file.is_file():
+                st.error(f"Backup file not found: {backup_file}")
+            else:
+                try:
+                    report = verify_backup(backup_file)
+                    st.session_state.backup_verify_report = report
+                except Exception as exc:
+                    _show_exception(exc)
+    with col_preview:
+        if st.button("Preview restore", key="backup_preview_btn"):
+            backup_file = _resolve_backup_path()
+            if backup_file is None:
+                st.error("Upload a zip or enter a backup path first.")
+            elif not backup_file.is_file():
+                st.error(f"Backup file not found: {backup_file}")
+            else:
+                try:
+                    preview = preview_restore_backup(backup_file)
+                    st.session_state.backup_preview_report = preview
+                except Exception as exc:
+                    _show_exception(exc)
+    with col_restore:
+        if st.button("Restore to new course folder", key="backup_restore_btn"):
+            backup_file = _resolve_backup_path()
+            if backup_file is None:
+                st.error("Upload a zip or enter a backup path first.")
+            elif not backup_file.is_file():
+                st.error(f"Backup file not found: {backup_file}")
+            else:
+                try:
+                    target_name = restore_as_name.strip() or None
+                    summary = restore_backup_to_new_course(
+                        backup_file,
+                        target_course_name=target_name,
+                    )
+                    st.session_state.backup_restore_summary = summary
+                    st.session_state.selected_course = summary.get("course_folder")
+                except RestoreTargetExistsError as exc:
+                    st.error(str(exc))
+                except InvalidBackupError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    _show_exception(exc)
+
+    verify_report = st.session_state.get("backup_verify_report")
+    if verify_report:
+        st.write("**Verification summary**")
+        st.write(f"Status: `{verify_report.get('status', 'unknown')}`")
+        st.write(f"Course folder: `{verify_report.get('course_folder') or '(none)'}`")
+        st.write(f"Files: {verify_report.get('file_count', 0)}")
+        st.write(
+            f"Size: {format_bytes(int(verify_report.get('total_bytes', 0)))}"
+        )
+        missing = verify_report.get("missing_expected_paths") or []
+        if missing:
+            st.write("Missing paths:")
+            for item in missing:
+                st.write(f"- `{item}`")
+        for warning in verify_report.get("warnings") or []:
+            st.warning(warning)
+        for error in verify_report.get("errors") or []:
+            st.error(error)
+
+    preview_report = st.session_state.get("backup_preview_report")
+    if preview_report:
+        st.write("**Restore preview**")
+        st.write(f"Target path: `{preview_report.get('target_path', '')}`")
+        st.write(f"Target exists: `{preview_report.get('target_exists')}`")
+        st.write(
+            f"Would restore files: {preview_report.get('would_restore_files', 0)}"
+        )
+        st.write(
+            f"Safe to restore: `{preview_report.get('safe_to_restore')}`"
+        )
+        for warning in preview_report.get("warnings") or []:
+            st.warning(warning)
+
+    restore_summary = st.session_state.get("backup_restore_summary")
+    if restore_summary:
+        st.success("Restore complete.")
+        st.write(f"Course folder: `{restore_summary.get('course_folder')}`")
+        st.write(f"Files restored: {restore_summary.get('files_restored', 0)}")
+        st.code(restore_summary.get("target_path", ""))
+
 
 def page_sources(course_name: str | None) -> None:
     st.header("Sources")
@@ -973,6 +1404,7 @@ def page_pipeline(course_name: str | None) -> None:
     _render_guided_workflow(course_name, source_id)
     pipeline_status = _render_pipeline_doctor(course_name, source_id)
     _render_study_pack(course_name, source_id, pipeline_status)
+    _render_extraction_quality(course_name, source_id)
 
     st.subheader("Manual pipeline controls")
     st.caption("Run individual steps yourself (same backend as Guided Workflow).")
@@ -1034,7 +1466,17 @@ def page_pipeline(course_name: str | None) -> None:
                     source_id,
                     overwrite=st.session_state.overwrite,
                 )
+            st.session_state.pop(f"pipeline_status_{source_id}", None)
             _show_result_summary("Extraction complete", summary)
+            quality_status = summary.get("extraction_quality_status")
+            if quality_status == "failed":
+                st.error(
+                    "Extraction quality failed — inspect the quality report before chunking."
+                )
+            elif quality_status == "needs_review":
+                st.warning(
+                    "Extraction quality needs review — some pages may be empty or low-text."
+                )
         except Exception as exc:
             _show_exception(exc)
 
@@ -2242,6 +2684,10 @@ def run() -> None:
         page_today(course_name)
     elif page == "Dashboard":
         page_dashboard(course_name)
+    elif page == "Course Quality":
+        page_course_quality(course_name)
+    elif page == "Evidence Trace":
+        page_evidence_trace(course_name)
     elif page == "Courses":
         page_courses()
     elif page == "Sources":

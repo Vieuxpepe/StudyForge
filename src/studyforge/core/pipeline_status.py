@@ -240,6 +240,21 @@ def get_pipeline_status(
     if extracted and not _file_exists(extraction_log):
         warnings.append(f"Extraction log missing: {extraction_log}")
 
+    extraction_quality_status = entry.get("extraction_quality_status")
+    quality_report_path = entry.get("extraction_quality_report_path", "")
+    if extracted:
+        if extraction_quality_status == "failed":
+            warnings.append(
+                "Extraction quality failed. Inspect extraction report before "
+                "chunking/digesting."
+            )
+        elif extraction_quality_status == "needs_review":
+            warnings.append(
+                "Extraction quality needs review. Some pages may be empty or low-text."
+            )
+        elif not extraction_quality_status and not _file_exists(quality_report_path):
+            warnings.append("Extraction quality has not been checked.")
+
     manifest_path = get_chunk_manifest_path(course_path, normalized_id)
     chunk_count = _load_chunk_count(manifest_path)
     chunked = manifest_path.is_file() and chunk_count is not None and chunk_count > 0
@@ -412,6 +427,7 @@ def get_pipeline_status(
         "missing_steps": missing_steps,
         "warnings": warnings,
         "next_action": next_action,
+        "extraction_quality_status": extraction_quality_status or None,
         "artifacts": {
             "stored_path": str(stored_path) if source_registered else None,
             "extracted_text_path": extracted_path or None,

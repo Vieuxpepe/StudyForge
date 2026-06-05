@@ -9,6 +9,7 @@ StudyForge can:
 - create courses from a folder template
 - register source PDFs per course
 - extract text from PDFs
+- check extraction quality after PDF extraction (empty/low-text pages, suspicious artifacts — no OCR, no AI)
 - chunk extracted text for LLM-sized packets
 - run **LM Studio** local digest (per chunk + combined digest)
 - review local digest quality with **rule-based checks** (no AI)
@@ -18,6 +19,8 @@ StudyForge can:
 - **practice active recall** with self-grading (correct / partial / wrong / skipped, no AI)
 - **track mistakes and weak points** from recall practice (manual, deterministic)
 - **generate daily review plans** from open mistakes, weak points, and weak recall attempts
+- **course quality report** — trust/readiness summary across all sources (deterministic, no AI)
+- **evidence trace viewer** — inspect source chunk → digest → audit chain (deterministic, no semantic search)
 - show **Pipeline Doctor** status and next recommended step in the GUI (including stale study pack warnings when a newer final audit was imported)
 - **guided workflow** — run one recommended pipeline step per click (not autonomous)
 
@@ -69,6 +72,8 @@ python scripts/create_course.py --code ECA1010 --name "Microeconomics"
 python scripts/add_source.py --course ECA1010_Microeconomics --type textbook --file "C:\path\to\book.pdf" --title "Main Textbook"
 
 python scripts/extract_source.py --course ECA1010_Microeconomics --source-id SRC-0001
+
+python scripts/check_extraction_quality.py --course ECA1010_Microeconomics --source-id SRC-0001
 
 python scripts/chunk_source.py --course ECA1010_Microeconomics --source-id SRC-0001
 
@@ -172,7 +177,7 @@ Also ignored: `.env`, `*.env`, `config/local_secrets.json`, local DB files, and 
 
 If you previously committed a real course folder, run `git rm -r --cached courses/YourCourse` once (files stay on disk) so Git stops tracking them.
 
-**Back up real course data locally:** course folders are gitignored, so use `python scripts/backup_course.py --course YourCourse` to create a zip under `courses/YourCourse/08_App_Data/exports/backups/`. Backups may contain private PDFs, extracted text, audits, and study logs — store them safely. Restore is manual in v1 (unzip into `courses/`).
+**Back up real course data locally:** course folders are gitignored, so use `python scripts/backup_course.py --course YourCourse` to create a zip under `courses/YourCourse/08_App_Data/exports/backups/`. Verify backups with `python scripts/verify_backup.py --file path\to\backup.zip`. Safe restore to a **new** course folder only (`--restore-as`); existing course folders are never overwritten in v1. Backups may contain private PDFs, extracted text, audits, and study logs — store them safely.
 
 ## Audit sanitizer (automated intermediate audit)
 
