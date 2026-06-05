@@ -56,11 +56,42 @@ Work through one source end-to-end on your machine.
 - [ ] Confirm `07_My_Work/mistakes_log.json` and `weak_points.json` exist
 - [ ] Generate today's review plan on **Review Tracker**
 - [ ] Open `07_My_Work/review_sessions/YYYY-MM-DD_review_plan.md`
-- [ ] Start a **Study Session** on the Study Session page (or `study_session.py --start`)
-- [ ] Confirm session includes review-priority items and unanswered active recall from study packs (when available)
+- [ ] Start a **Study Session** on the Study Session page (or `study_session.py --start`) — course-wide, **Study unit**, or **Exam target** scope
+- [ ] Optional: start a unit session (`study_session.py --start --unit-id UNIT-0001`) or **Start unit study session** on **Study Units**
+- [ ] Optional: start an exam session (`study_session.py --start --exam-id EXAM-0001`) or **Start exam study session** on **Exam Prep** / **Study Session** (exam target)
+- [ ] Confirm session includes review-priority items and unanswered active recall from study packs (when available); unit sessions include unit-level recall/flashcards first, then sources in that unit; exam sessions include only items from the exam target scope (units, direct sources, sources inside units)
 - [ ] Complete at least one session item (recall, unanswered recall, mistake, or weak point)
 - [ ] Finish session and export summary under `07_My_Work/study_sessions/`
 - [ ] Confirm priorities match your open mistakes / weak points / recall gaps / flashcards / unanswered recall
+- [ ] On **Study Units**, export a **Unit Synthesis Packet** (optional: include learning state)
+- [ ] Confirm `08_App_Data/reports/study_units/UNIT-XXXX_synthesis_packet.md` contains instructions, source materials, and source IDs (no automatic AI call)
+- [ ] Paste unified synthesis into external AI, then **Import Unit Synthesis** (file or paste) on **Study Units**
+- [ ] Confirm `06_Study_Outputs/study_units/UNIT-XXXX/UNIT-XXXX_synthesis_v001.md` and registry exist; quality status shown (ok / needs_review / failed)
+- [ ] Generate **Unit Study Pack** (`generate_unit_study_pack.py` or GUI) after synthesis import
+- [ ] Confirm `UNIT-XXXX_unit_study_guide.md`, flashcards, quiz, active recall, and manifest under `06_Study_Outputs/study_units/UNIT-XXXX/`
+- [ ] Optional: run `--diagnose-only` before generate
+- [ ] After unit study pack: practice unit recall (`unit_review.py --list-recall` / `--record-recall`) and unit flashcards (`--list-flashcards` / `--record-flashcard`); logs under `07_My_Work/unit_active_recall_logs/` and `07_My_Work/unit_flashcard_logs/` (separate from source-level)
+- [ ] Start a unit study session and confirm **Unit active recall** and **Unit flashcard** item types appear; grades save to unit logs
+- [ ] Generate unit review plan and confirm **Unit Active Recall**, **Unit Flashcards Due**, and **Unit-Level New Practice** sections
+- [ ] On **Today**, active units with a unit pack show unit due flashcard and recall gap counts
+- [ ] Generate a **source** mock test (`mock_test.py --source-id SRC-0001 --generate` or GUI **Mock Tests**)
+- [ ] Generate a **unit** mock test after unit study pack exists (`--unit-id UNIT-0001 --generate`)
+- [ ] Confirm Markdown + JSON under `07_My_Work/mock_tests/` with questions and answer key
+- [ ] Self-grade and record attempt (`--record --score N --total M`); optional `--weak-topic` creates weak points
+- [ ] Optional: grade question-by-question (`grade_mock_test.py --list`, `--grade-question`, `--summary`, `--finalize`, `--export-review`) or **Mock Tests → Detailed Grading**
+- [ ] Confirm partial credit works (correct=1, partial=0.5) and finalizing records a normal mock attempt with detailed score in notes
+- [ ] Confirm graded data under `07_My_Work/mock_tests/graded/` and review Markdown exports
+- [ ] Confirm `mock_test_attempts.json` and **Today** shows latest mock test score when recorded
+- [ ] If a mock test has ungraded questions, **Today** may recommend finishing grading
+- [ ] Create an **exam target** (`exam_targets.py --create` or GUI **Exam Prep**) with units, sources, date, and target score
+- [ ] Confirm `00_Master/exam_targets.json` stores the target
+- [ ] Run `exam_prep.py --exam-id EXAM-0001 --export` (or GUI **Generate exam prep plan**)
+- [ ] Confirm plan includes scope, readiness, review counts, mock status, recommended actions, and checklists under `07_My_Work/exam_prep/`
+- [ ] View **Exam Readiness** on **Exam Prep** (or `exam_readiness.py --exam-id EXAM-0001`) — score, status, breakdown, blockers, recommendations
+- [ ] Optional: export readiness report (`exam_readiness.py --export`) to `07_My_Work/exam_prep/EXAM-0001_exam_readiness_report.md` and `.json`
+- [ ] On **Today**, confirm nearest exam shows readiness when an active exam target exists
+- [ ] Readiness score is deterministic guidance only — not a guarantee of exam performance
+- [ ] On **Today**, confirm nearest exam and active exam target count when targets exist
 
 ## Pass criteria
 
@@ -72,26 +103,42 @@ Work through one source end-to-end on your machine.
 
 ## GUI quick map
 
-| Step | Where in GUI |
-|------|----------------|
-| What to study today | **Today** |
-| Course trust/readiness across sources | **Course Quality** |
-| Evidence chain inspection | **Evidence Trace** |
-| Course | Sidebar + **Courses** |
-| Course backup | **Courses** → **Course backup** |
-| Backup verify / safe restore | **Courses** → **Backup verification** |
-| Source PDF | **Sources** |
-| Guided next step | **Pipeline** → **Guided Workflow** |
-| Extract / chunk / digest / review | **Pipeline** (manual controls) |
-| Extraction quality check | **Pipeline** → **Extraction Quality** |
-| Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** section after final audit) |
-| Intermediate/final audits, normalizer | **Audits** |
-| Active recall practice | **Active Recall** |
-| Flashcard review | **Flashcards** |
-| Mistakes / weak points / review plan | **Review Tracker** |
-| Guided study session | **Study Session** |
-| LM Studio URL / tokens | **Pipeline** |
-| Google API key | **Settings** |
+Sidebar **Go to** uses grouped labels (e.g. `Build Study Material · Pipeline`, `Study / Review · Study Session`). Select a **Course** in the sidebar first when a page needs one.
+
+| Section | Step | Where in GUI |
+|---------|------|----------------|
+| Today | What to study today; navigation helper | **Today** (expand **Where should I go?**) |
+| Build Study Material | Pipeline overview | **Dashboard** |
+| Build Study Material | Source PDF | **Sources** |
+| Build Study Material | Guided next step | **Pipeline** → **Guided Workflow** |
+| Build Study Material | Extract / chunk / digest / review | **Pipeline** (manual controls) |
+| Build Study Material | Extraction quality check | **Pipeline** → **Extraction Quality** |
+| Build Study Material | Pipeline Doctor + study pack | **Pipeline** (top: Doctor; **Study Pack** after final audit) |
+| Build Study Material | Intermediate/final audits, normalizer | **Audits** |
+| Build Study Material | Group sources into topic/exam units | **Study Units** |
+| Build Study Material | Unit readiness + review summary | **Study Units** → **Unit Dashboard** |
+| Build Study Material | Unit-specific review plan | **Study Units** → **Generate unit review plan** |
+| Build Study Material | Unit synthesis packet (manual AI) | **Study Units** → **Export synthesis packet** |
+| Build Study Material | Import versioned unit synthesis | **Study Units** → **Import Unit Synthesis** |
+| Build Study Material | Unit study pack from synthesis | **Study Units** → **Unit Study Pack** |
+| Study / Review | Guided study session | **Study Session** |
+| Study / Review | Active recall practice | **Active Recall** |
+| Study / Review | Flashcard review | **Flashcards** |
+| Study / Review | Mock test generation and scoring | **Mock Tests** |
+| Study / Review | Exam targets and prep plans | **Exam Prep** |
+| Study / Review | Mistakes / weak points / review plan | **Review Tracker** |
+| Quality / Trust | Course trust/readiness across sources | **Course Quality** |
+| Quality / Trust | Evidence chain inspection | **Evidence Trace** |
+| Course Tools | Course create/select | **Courses** |
+| Course Tools | Course backup | **Courses** → **Course backup** |
+| Course Tools | Backup verify / safe restore | **Courses** → **Backup verification** |
+| Settings | LM Studio URL / model / chunking / digest / GUI defaults | **Settings** → saves `config/local_app_settings.json` (gitignored; no API keys) |
+| Settings | LM Studio overrides per session | **Pipeline** (uses saved defaults on startup) |
+| Settings | Google API key | **Settings** (`.env` or `config/local_secrets.json`; not app settings) |
+
+**Smoke:** Open the GUI, confirm each sidebar group appears in **Go to**, switch pages, and verify each page shows a one-line caption under the title.
+
+**Settings smoke:** On **Settings**, set LM Studio base URL (e.g. LAN IP), click **Save settings**, restart GUI — **Pipeline** should show the saved URL. Confirm `config/local_app_settings.json` is not tracked by Git.
 
 ## CLI equivalent (optional)
 

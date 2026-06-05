@@ -17,6 +17,7 @@ ENV/
 *.env
 .env.*
 config/local_secrets.json
+config/local_app_settings.json
 
 # Databases (SQLite later)
 *.sqlite

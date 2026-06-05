@@ -37,6 +37,13 @@ from studyforge.core.guided_workflow import (
     run_guided_next_step,
 )
 from studyforge.core.pipeline_status import STEP_ORDER, get_pipeline_status
+from studyforge.core.app_settings import (
+    get_app_settings_path,
+    get_default_app_settings,
+    load_app_settings,
+    save_app_settings,
+    validate_app_settings,
+)
 from studyforge.core.paths import find_project_root, get_courses_dir, load_config
 from studyforge.core.secrets import get_google_api_key, set_google_api_key
 from studyforge.core.backup import (
@@ -131,7 +138,81 @@ from studyforge.study.study_session import (
     start_study_session,
 )
 from studyforge.study.digest_review import review_local_digest_for_source
+from studyforge.study.study_unit_dashboard import (
+    UnitReviewPlanExistsError,
+    export_unit_dashboard,
+    generate_unit_review_plan,
+    get_study_unit_dashboard,
+    get_unit_dashboard_paths,
+)
+from studyforge.study.unit_study_pack import (
+    UnitStudyPackOutputExistsError,
+    diagnose_unit_study_pack,
+    generate_unit_study_pack,
+)
+from studyforge.study.unit_synthesis_import import import_unit_synthesis
+from studyforge.study.unit_synthesis_packet import (
+    UnitSynthesisPacketExistsError,
+    build_unit_synthesis_packet,
+    get_unit_synthesis_packet_paths,
+)
+from studyforge.study.study_units import (
+    InvalidSourceIdError,
+    InvalidStudyUnitStatusError,
+    StudyUnitNotFoundError,
+    add_sources_to_unit,
+    create_study_unit,
+    list_study_units,
+    remove_sources_from_unit,
+    update_study_unit,
+)
+from studyforge.study.exam_prep import (
+    ExamPrepPlanExistsError,
+    collect_exam_prep_state,
+    generate_exam_prep_plan,
+    recommend_exam_prep_actions,
+)
+from studyforge.study.exam_readiness import (
+    ExamReadinessReportExistsError,
+    build_exam_readiness_markdown,
+    export_exam_readiness_report,
+    get_exam_readiness_report,
+)
+from studyforge.study.exam_targets import (
+    ExamTargetNotFoundError,
+    InvalidExamDateError,
+    InvalidExamTargetStatusError,
+    InvalidExamUnitIdError,
+    InvalidTargetScoreError,
+    create_exam_target,
+    list_active_exam_targets,
+    list_exam_targets,
+    update_exam_target,
+)
+from studyforge.study.mock_test_grading import (
+    InvalidMockTestGradeError,
+    MockTestGradingAlreadyFinalizedError,
+    MockTestQuestionNotFoundError,
+    MockTestReviewExistsError,
+    build_mock_test_review_markdown,
+    export_mock_test_review,
+    finalize_mock_test_grading,
+    record_mock_question_result,
+    summarize_mock_test_grading,
+)
+from studyforge.study.mock_tests import (
+    InvalidMockTestScopeError,
+    InvalidMockTestScoreError,
+    MockTestNotFoundError,
+    MockTestNotReadyError,
+    generate_mock_test,
+    list_mock_tests,
+    load_mock_test_json,
+    record_mock_test_attempt,
+    summarize_mock_test_attempts,
+)
 from studyforge.study.today_dashboard import export_today_dashboard, get_today_dashboard
+from studyforge.study.unit_review import get_unit_review_counts
 from studyforge.study.weak_points import (
     InvalidConfidenceError,
     InvalidWeakPointStatusError,
@@ -142,41 +223,60 @@ from studyforge.study.weak_points import (
     update_weak_point,
 )
 from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_no
-
-NAV_PAGES = [
-    "Today",
-    "Dashboard",
-    "Course Quality",
-    "Evidence Trace",
-    "Courses",
-    "Sources",
-    "Pipeline",
-    "Audits",
-    "Active Recall",
-    "Flashcards",
-    "Review Tracker",
-    "Study Session",
-    "Settings",
-]
+from studyforge.ui.navigation import (
+    WHERE_TO_GO_HELP,
+    flatten_navigation_pages,
+    get_page_by_key,
+    get_page_description,
+    navigation_keys,
+    option_to_page_key,
+)
 
 SOURCE_TYPES = ["textbook", "slides", "homework", "notes", "extra_readings"]
 
 
-def _init_session_state() -> None:
-    defaults = {
+def _session_defaults_from_app_settings(settings: dict) -> dict:
+    """Map persisted app settings to Streamlit session state keys."""
+    lm = settings.get("lm_studio", {})
+    chunking = settings.get("chunking", {})
+    digest = settings.get("digest", {})
+    gui = settings.get("gui", {})
+    default_page = str(gui.get("default_page", "today")).strip().lower()
+    if default_page not in navigation_keys():
+        default_page = "today"
+    return {
         "project_root": str(find_project_root()),
-        "lm_base_url": DEFAULT_BASE_URL,
-        "lm_model": "",
-        "max_words": 1200,
-        "overlap_words": 150,
-        "overwrite": False,
-        "max_digest_tokens": DEFAULT_DIGEST_MAX_TOKENS,
+        "lm_base_url": lm.get("base_url", DEFAULT_BASE_URL),
+        "lm_model": lm.get("default_model", ""),
+        "lm_temperature": float(lm.get("temperature", 0.2)),
+        "lm_timeout": int(lm.get("timeout", 300)),
+        "max_words": int(chunking.get("max_words", 1200)),
+        "overlap_words": int(chunking.get("overlap_words", 150)),
+        "overwrite": bool(digest.get("overwrite_default", False)),
+        "full_digest_default": bool(digest.get("full_digest_default", False)),
+        "max_digest_tokens": int(lm.get("max_tokens", DEFAULT_DIGEST_MAX_TOKENS)),
         "google_audit_model": DEFAULT_GEMMA_4_26B_MODEL,
-        "limit_chunks": 0,
+        "limit_chunks": int(digest.get("limit_chunks_default", 1)),
         "only_needs_review": False,
         "selected_course": None,
         "selected_source_id": None,
+        "nav_page_key": default_page,
+        "show_advanced_options": bool(gui.get("show_advanced_options", True)),
     }
+
+
+def _apply_app_settings_to_session(settings: dict) -> None:
+    """Overwrite pipeline/GUI session keys from saved settings."""
+    for key, value in _session_defaults_from_app_settings(settings).items():
+        if key in {"project_root", "selected_course", "selected_source_id", "only_needs_review"}:
+            continue
+        st.session_state[key] = value
+
+
+def _init_session_state() -> None:
+    root = find_project_root()
+    settings = load_app_settings(root)
+    defaults = _session_defaults_from_app_settings(settings)
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -184,6 +284,16 @@ def _init_session_state() -> None:
 
 def _course_names() -> list[str]:
     return [p.name for p in list_courses()]
+
+
+def _render_page_intro(page_key: str) -> None:
+    """Render page title and role description from navigation metadata."""
+    page = get_page_by_key(page_key)
+    title = page["label"] if page else page_key.replace("_", " ").title()
+    st.header(title)
+    description = get_page_description(page_key)
+    if description:
+        st.caption(description)
 
 
 def _render_sidebar() -> tuple[str, str | None]:
@@ -198,16 +308,24 @@ def _render_sidebar() -> tuple[str, str | None]:
         selected = st.sidebar.selectbox("Course", courses, index=index)
         st.session_state.selected_course = selected
     else:
-        st.sidebar.info("No courses yet. Create one on the Courses page.")
+        st.sidebar.info("No courses yet. Create one under Course Tools → Courses.")
         st.session_state.selected_course = None
 
-    page = st.sidebar.radio("Navigation", NAV_PAGES)
-    return page, st.session_state.selected_course
+    options = flatten_navigation_pages()
+    keys = navigation_keys()
+    current_key = st.session_state.get("nav_page_key", keys[0])
+    if current_key not in keys:
+        current_key = keys[0]
+    selected_index = keys.index(current_key)
+    choice = st.sidebar.selectbox("Go to", options, index=selected_index)
+    page_key = option_to_page_key(choice) or keys[0]
+    st.session_state.nav_page_key = page_key
+    return page_key, st.session_state.selected_course
 
 
 def _require_course() -> str | None:
     if not st.session_state.selected_course:
-        st.warning("Select or create a course in the sidebar.")
+        st.warning("Create or select a course first (sidebar or **Courses** page).")
         return None
     return st.session_state.selected_course
 
@@ -222,7 +340,7 @@ def _source_options(course_name: str) -> list[dict]:
 
 def _select_source(sources: list[dict], key: str = "source_picker") -> str | None:
     if not sources:
-        st.info("No sources for this course. Add one on the Sources page.")
+        st.info("No sources yet. Add a source PDF from the **Sources** page.")
         return None
     labels = [
         f"{s.get('id', '?')} — {s.get('title', 'Untitled')} ({s.get('status', '?')})"
@@ -285,7 +403,6 @@ def _render_guided_workflow(course_name: str, source_id: str) -> None:
     for warning in guided.get("warnings") or []:
         st.warning(f"⚠️ {warning}")
 
-    st.write("**Advanced options**")
     gw_overwrite = st.checkbox(
         "Overwrite outputs",
         value=st.session_state.overwrite,
@@ -293,50 +410,73 @@ def _render_guided_workflow(course_name: str, source_id: str) -> None:
     )
     st.session_state.overwrite = gw_overwrite
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.session_state.lm_base_url = st.text_input(
-            "LM Studio base URL",
-            value=st.session_state.lm_base_url,
-            key=f"gw_lm_url_{source_id}",
-        )
-    with c2:
-        st.session_state.lm_model = st.text_input(
-            "Model (empty = first from /models)",
-            value=st.session_state.lm_model,
-            key=f"gw_lm_model_{source_id}",
-        )
+    gw_full_digest = bool(st.session_state.full_digest_default)
+    if st.session_state.show_advanced_options:
+        st.write("**Advanced options**")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.session_state.lm_base_url = st.text_input(
+                "LM Studio base URL",
+                value=st.session_state.lm_base_url,
+                key=f"gw_lm_url_{source_id}",
+            )
+        with c2:
+            st.session_state.lm_model = st.text_input(
+                "Model (empty = first from /models)",
+                value=st.session_state.lm_model,
+                key=f"gw_lm_model_{source_id}",
+            )
 
-    st.session_state.max_digest_tokens = st.number_input(
-        "Max digest tokens",
-        min_value=1000,
-        max_value=32000,
-        value=int(st.session_state.max_digest_tokens),
-        step=500,
-        key=f"gw_max_tokens_{source_id}",
-    )
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            st.session_state.max_digest_tokens = st.number_input(
+                "Max digest tokens",
+                min_value=1000,
+                max_value=32000,
+                value=int(st.session_state.max_digest_tokens),
+                step=500,
+                key=f"gw_max_tokens_{source_id}",
+            )
+        with tc2:
+            st.session_state.lm_temperature = st.number_input(
+                "Temperature",
+                min_value=0.0,
+                max_value=2.0,
+                value=float(st.session_state.lm_temperature),
+                step=0.1,
+                key=f"gw_temperature_{source_id}",
+            )
+        with tc3:
+            st.session_state.lm_timeout = st.number_input(
+                "Timeout (seconds)",
+                min_value=30,
+                max_value=3600,
+                value=int(st.session_state.lm_timeout),
+                step=30,
+                key=f"gw_timeout_{source_id}",
+            )
 
-    cc1, cc2, cc3 = st.columns(3)
-    with cc1:
-        st.session_state.max_words = st.number_input(
-            "Max words (chunking)",
-            min_value=100,
-            value=int(st.session_state.max_words),
-            key=f"gw_max_words_{source_id}",
-        )
-    with cc2:
-        st.session_state.overlap_words = st.number_input(
-            "Overlap words (chunking)",
-            min_value=0,
-            value=int(st.session_state.overlap_words),
-            key=f"gw_overlap_{source_id}",
-        )
-    with cc3:
-        gw_full_digest = st.checkbox(
-            "Run full digest (not first chunk only)",
-            value=False,
-            key=f"gw_full_digest_{source_id}",
-        )
+        cc1, cc2, cc3 = st.columns(3)
+        with cc1:
+            st.session_state.max_words = st.number_input(
+                "Max words (chunking)",
+                min_value=100,
+                value=int(st.session_state.max_words),
+                key=f"gw_max_words_{source_id}",
+            )
+        with cc2:
+            st.session_state.overlap_words = st.number_input(
+                "Overlap words (chunking)",
+                min_value=0,
+                value=int(st.session_state.overlap_words),
+                key=f"gw_overlap_{source_id}",
+            )
+        with cc3:
+            gw_full_digest = st.checkbox(
+                "Run full digest (not first chunk only)",
+                value=bool(st.session_state.full_digest_default),
+                key=f"gw_full_digest_{source_id}",
+            )
 
     can_run = guided.get("can_run", False)
     if st.button(
@@ -351,6 +491,8 @@ def _render_guided_workflow(course_name: str, source_id: str) -> None:
                 "base_url": st.session_state.lm_base_url,
                 "model": st.session_state.lm_model or None,
                 "max_tokens": int(st.session_state.max_digest_tokens),
+                "temperature": float(st.session_state.lm_temperature),
+                "timeout": int(st.session_state.lm_timeout),
                 "max_words": int(st.session_state.max_words),
                 "overlap_words": int(st.session_state.overlap_words),
                 "full_digest": gw_full_digest,
@@ -754,15 +896,12 @@ def _show_result_summary(title: str, data: dict) -> None:
 
 
 def page_today(course_name: str | None) -> None:
-    st.header("Today")
+    _render_page_intro("today")
     if not _require_course():
         return
 
-    st.caption(
-        "What to study now — due flashcards, active recall gaps, mistakes, and "
-        "weak points. Deterministic (no AI). Pipeline Doctor on **Pipeline** is "
-        "for source processing; **Today** is for studying."
-    )
+    with st.expander("Where should I go?", expanded=False):
+        st.markdown(WHERE_TO_GO_HELP)
 
     try:
         dashboard = get_today_dashboard(course_name)
@@ -773,11 +912,57 @@ def page_today(course_name: str | None) -> None:
     summary = dashboard.get("summary", {})
     st.subheader(f"{dashboard.get('course', '')} — {dashboard.get('date', '')}")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Due flashcards", summary.get("due_flashcards", 0))
     c2.metric("Active recall", summary.get("active_recall_needs_review", 0))
     c3.metric("Open mistakes", summary.get("open_mistakes", 0))
     c4.metric("Open weak points", summary.get("open_weak_points", 0))
+    latest_mock = summary.get("latest_mock_test_score")
+    if latest_mock:
+        c5.metric(
+            "Latest mock test %",
+            latest_mock.get("percent", 0),
+            help=f"{latest_mock.get('score_correct')}/{latest_mock.get('score_total')}",
+        )
+    else:
+        c5.metric("Latest mock test %", "—")
+    st.caption(f"Active study units: {summary.get('active_study_units', 0)}")
+    nearest_exam = summary.get("nearest_exam")
+    if nearest_exam:
+        nearest_line = (
+            f"Nearest exam: {nearest_exam.get('title', '')} "
+            f"({nearest_exam.get('exam_date', '')}) — "
+            f"{nearest_exam.get('days_until_exam', '')} day(s) away"
+        )
+        if nearest_exam.get("readiness_score") is not None:
+            nearest_line += (
+                f" · readiness: {nearest_exam.get('readiness_score')}% "
+                f"({nearest_exam.get('readiness_status', '')})"
+            )
+        st.caption(nearest_line)
+    elif summary.get("active_exam_targets", 0):
+        st.caption(f"Active exam targets: {summary.get('active_exam_targets', 0)}")
+    active_units = dashboard.get("active_units") or summary.get("active_units") or []
+    if active_units:
+        with st.expander("Active study units", expanded=False):
+            for unit in active_units:
+                markers = ""
+                if unit.get("has_synthesis"):
+                    markers += " · synthesis"
+                if unit.get("has_unit_pack"):
+                    markers += " · unit pack"
+                extra = ""
+                if unit.get("has_unit_pack"):
+                    due_fc = unit.get("unit_due_flashcards")
+                    recall_gaps = unit.get("unit_recall_gaps")
+                    if due_fc is not None or recall_gaps is not None:
+                        extra = (
+                            f" — unit due flashcards: {due_fc or 0}, "
+                            f"unit recall gaps: {recall_gaps or 0}"
+                        )
+                st.write(
+                    f"- `{unit.get('unit_id', '')}` — {unit.get('title', '')}{markers}{extra}"
+                )
 
     actions = dashboard.get("recommended_actions") or []
     if actions:
@@ -842,7 +1027,9 @@ def page_today(course_name: str | None) -> None:
             )
         st.dataframe(rows, use_container_width=True)
     else:
-        st.write("No priority items for today.")
+        st.info(
+            "Nothing is due right now. You can still review flashcards or start a new source."
+        )
 
     warnings = dashboard.get("warnings") or []
     if warnings:
@@ -852,14 +1039,9 @@ def page_today(course_name: str | None) -> None:
 
 
 def page_course_quality(course_name: str | None) -> None:
-    st.header("Course Quality")
+    _render_page_intro("course_quality")
     if not _require_course():
         return
-
-    st.caption(
-        "Trust/readiness across all sources — deterministic checks only. "
-        "Does not replace final audit or active recall."
-    )
 
     col_refresh, col_export = st.columns(2)
     with col_refresh:
@@ -887,6 +1069,24 @@ def page_course_quality(course_name: str | None) -> None:
         c2.metric("Ready", report.get("ready_count", 0))
         c3.metric("Needs review", report.get("needs_review_count", 0))
         c4.metric("Failed", report.get("failed_count", 0))
+        st.caption(f"Study units: {report.get('study_units_count', 0)}")
+        nearest_exam = report.get("nearest_exam")
+        if nearest_exam:
+            cq_nearest = (
+                f"Nearest exam: {nearest_exam.get('title', '')} "
+                f"({nearest_exam.get('exam_date', '')}) — "
+                f"{nearest_exam.get('days_until_exam', '')} day(s) away"
+            )
+            if nearest_exam.get("readiness_score") is not None:
+                cq_nearest += (
+                    f" · readiness: {nearest_exam.get('readiness_score')}% "
+                    f"({nearest_exam.get('readiness_status', '')})"
+                )
+            st.caption(cq_nearest)
+        elif report.get("active_exam_targets_count", 0):
+            st.caption(
+                f"Active exam targets: {report.get('active_exam_targets_count', 0)}"
+            )
 
         rows = []
         for source in report.get("sources") or []:
@@ -942,14 +1142,9 @@ def page_course_quality(course_name: str | None) -> None:
 
 
 def page_evidence_trace(course_name: str | None) -> None:
-    st.header("Evidence Trace")
+    _render_page_intro("evidence_trace")
     if not _require_course():
         return
-
-    st.caption(
-        "Inspect the evidence chain: source chunk → local digest → audits → study pack. "
-        "Deterministic string matching only (no AI, no semantic search)."
-    )
 
     sources = _source_options(course_name)
     source_id = _select_source(sources, key="evidence_trace_source")
@@ -984,7 +1179,7 @@ def page_evidence_trace(course_name: str | None) -> None:
     st.subheader("Chunk Viewer")
     chunks = list_source_chunks(course_name, source_id)
     if not chunks:
-        st.info("No chunks found. Chunk the source on the Pipeline page first.")
+        st.info("Chunk this source first on **Pipeline** to inspect chunk-level evidence.")
         return
 
     labels = [
@@ -1071,9 +1266,9 @@ def page_evidence_trace(course_name: str | None) -> None:
 
 
 def page_dashboard(course_name: str | None) -> None:
-    st.header("Dashboard")
+    _render_page_intro("dashboard")
     if not course_name:
-        st.write("Create a course to get started.")
+        st.info("Create or select a course first.")
         return
 
     st.subheader(course_name)
@@ -1087,7 +1282,7 @@ def page_dashboard(course_name: str | None) -> None:
     st.write(f"**Sources:** {len(sources)}")
 
     if not sources:
-        st.info("No sources registered yet.")
+        st.info("No sources yet. Add a source PDF from the **Sources** page.")
         return
 
     rows = []
@@ -1110,7 +1305,7 @@ def page_dashboard(course_name: str | None) -> None:
 
 
 def page_courses() -> None:
-    st.header("Courses")
+    _render_page_intro("courses")
 
     st.subheader("Existing courses")
     courses = list_courses()
@@ -1338,12 +1533,14 @@ def page_courses() -> None:
 
 
 def page_sources(course_name: str | None) -> None:
-    st.header("Sources")
+    _render_page_intro("sources")
     if not _require_course():
         return
 
     st.subheader("Registered sources")
     sources = _source_options(course_name)
+    if not sources:
+        st.info("No sources yet. Upload a PDF below to register your first source.")
     if sources:
         st.dataframe(
             [
@@ -1392,7 +1589,7 @@ def page_sources(course_name: str | None) -> None:
 
 
 def page_pipeline(course_name: str | None) -> None:
-    st.header("Pipeline")
+    _render_page_intro("pipeline")
     if not _require_course():
         return
 
@@ -1421,14 +1618,32 @@ def page_pipeline(course_name: str | None) -> None:
             "Model (empty = first from /models)",
             value=st.session_state.lm_model,
         )
-    st.session_state.max_digest_tokens = st.number_input(
-        "Max tokens per chunk",
-        min_value=1000,
-        max_value=32000,
-        value=int(st.session_state.max_digest_tokens),
-        step=500,
-        help="Incomplete digests retry with +2000 tokens. Default 6000.",
-    )
+    tok1, tok2, tok3 = st.columns(3)
+    with tok1:
+        st.session_state.max_digest_tokens = st.number_input(
+            "Max tokens per chunk",
+            min_value=1000,
+            max_value=32000,
+            value=int(st.session_state.max_digest_tokens),
+            step=500,
+            help="Incomplete digests retry with +2000 tokens. Default 6000.",
+        )
+    with tok2:
+        st.session_state.lm_temperature = st.number_input(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=float(st.session_state.lm_temperature),
+            step=0.1,
+        )
+    with tok3:
+        st.session_state.lm_timeout = st.number_input(
+            "Timeout (seconds)",
+            min_value=30,
+            max_value=3600,
+            value=int(st.session_state.lm_timeout),
+            step=30,
+        )
 
     if st.button("Check LM Studio connection"):
         result = check_lm_studio_connection(st.session_state.lm_base_url)
@@ -1508,6 +1723,8 @@ def page_pipeline(course_name: str | None) -> None:
                     base_url=st.session_state.lm_base_url,
                     model=st.session_state.lm_model or None,
                     max_tokens=int(st.session_state.max_digest_tokens),
+                    temperature=float(st.session_state.lm_temperature),
+                    timeout=int(st.session_state.lm_timeout),
                     limit_chunks=1,
                     overwrite=st.session_state.overwrite,
                 )
@@ -1524,6 +1741,8 @@ def page_pipeline(course_name: str | None) -> None:
                     base_url=st.session_state.lm_base_url,
                     model=st.session_state.lm_model or None,
                     max_tokens=int(st.session_state.max_digest_tokens),
+                    temperature=float(st.session_state.lm_temperature),
+                    timeout=int(st.session_state.lm_timeout),
                     overwrite=st.session_state.overwrite,
                 )
             _show_result_summary("Local digest complete", summary)
@@ -1542,7 +1761,7 @@ def page_pipeline(course_name: str | None) -> None:
 
 
 def page_audits(course_name: str | None) -> None:
-    st.header("Audits")
+    _render_page_intro("audits")
     if not _require_course():
         return
 
@@ -1834,15 +2053,495 @@ def _render_file_preview(course_name: str, source_id: str) -> None:
         _show_exception(exc)
 
 
-def page_active_recall(course_name: str | None) -> None:
-    st.header("Active Recall")
+def page_study_units(course_name: str | None) -> None:
+    _render_page_intro("study_units")
     if not _require_course():
         return
 
     st.caption(
-        "Practice one question at a time and self-grade (no AI). "
-        "Requires a generated study pack with an active recall file."
+        "Group sources by topic or exam. The unit dashboard aggregates readiness "
+        "and review items per unit. No AI synthesis or merged study packs yet."
     )
+
+    try:
+        units = list_study_units(course_name)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.subheader("Study units")
+    if units:
+        rows = []
+        for unit in units:
+            rows.append(
+                {
+                    "Unit ID": unit.get("unit_id", ""),
+                    "Title": unit.get("title", ""),
+                    "Sources": ", ".join(unit.get("source_ids", [])),
+                    "Status": unit.get("status", "active"),
+                    "Tags": ", ".join(unit.get("tags", [])),
+                }
+            )
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.info(
+            "No study units yet. Create one below to group related sources "
+            "(textbook chapter + slides + homework)."
+        )
+
+    st.subheader("Create unit")
+    sources = _source_options(course_name)
+    source_labels = [
+        f"{s.get('id', '?')} — {s.get('title', 'Untitled')}" for s in sources
+    ]
+    source_ids = [s.get("id", "") for s in sources]
+    with st.form("create_study_unit_form", clear_on_submit=True):
+        new_title = st.text_input("Title", placeholder="Inflation and CPI")
+        new_description = st.text_area(
+            "Description",
+            placeholder="Prepare for Quiz 2",
+        )
+        selected_sources = st.multiselect(
+            "Sources",
+            options=source_labels,
+            default=[],
+        )
+        new_tags = st.text_input(
+            "Tags (comma-separated)",
+            placeholder="quiz2, inflation",
+        )
+        submitted = st.form_submit_button("Create unit")
+    if submitted:
+        if not new_title.strip():
+            st.error("Enter a title first.")
+        else:
+            try:
+                picked_ids = [
+                    source_ids[source_labels.index(label)]
+                    for label in selected_sources
+                    if label in source_labels
+                ]
+                tags = [
+                    tag.strip()
+                    for tag in new_tags.split(",")
+                    if tag.strip()
+                ]
+                unit = create_study_unit(
+                    course_name,
+                    new_title.strip(),
+                    description=new_description.strip() or None,
+                    source_ids=picked_ids,
+                    tags=tags,
+                )
+                st.success(f"Created `{unit['unit_id']}` — {unit['title']}")
+                st.rerun()
+            except InvalidSourceIdError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    if not units:
+        return
+
+    st.subheader("Unit details")
+    unit_labels = [
+        f"{unit.get('unit_id', '')} — {unit.get('title', '')}" for unit in units
+    ]
+    unit_map = {label: unit for label, unit in zip(unit_labels, units)}
+    picked_label = st.selectbox("Select unit", unit_labels, key="su_pick_unit")
+    picked_unit = unit_map[picked_label]
+    unit_id = picked_unit.get("unit_id", "")
+
+    try:
+        dashboard = get_study_unit_dashboard(course_name, unit_id)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    st.subheader("Unit Dashboard")
+    st.write(f"**Description:** {dashboard.get('description') or '—'}")
+    review = dashboard.get("review_summary") or {}
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Due flashcards", review.get("due_flashcards", 0))
+    m2.metric("Active recall", review.get("active_recall_needs_review", 0))
+    m3.metric("Open mistakes", review.get("open_mistakes", 0))
+    m4.metric("Open weak points", review.get("open_weak_points", 0))
+    st.write(
+        f"**Ready sources:** {dashboard.get('ready_sources', 0)} · "
+        f"**Incomplete:** {dashboard.get('incomplete_sources', 0)}"
+    )
+    if dashboard.get("has_unit_synthesis"):
+        st.write(
+            f"**Latest synthesis:** `{dashboard.get('latest_synthesis_id', '')}` "
+            f"({dashboard.get('latest_synthesis_quality', 'unknown')})"
+        )
+        if dashboard.get("latest_synthesis_path"):
+            st.caption(f"Synthesis path: `{dashboard['latest_synthesis_path']}`")
+    else:
+        st.caption("No unit synthesis imported yet.")
+
+    if dashboard.get("has_unit_study_pack"):
+        st.write(
+            f"**Unit study pack:** quality "
+            f"`{dashboard.get('latest_unit_study_pack_quality', 'unknown')}` "
+            f"(based on `{dashboard.get('based_on_unit_synthesis_id', '')}`)"
+        )
+        if dashboard.get("latest_unit_study_pack_manifest_path"):
+            st.caption(f"Manifest: `{dashboard['latest_unit_study_pack_manifest_path']}`")
+        try:
+            review_counts = get_unit_review_counts(course_name, unit_id)
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            rc1.metric("Unit recall questions", review_counts.get("unit_question_count", 0))
+            rc2.metric("Unit flashcards", review_counts.get("unit_flashcard_count", 0))
+            rc3.metric("Unit recall gaps", review_counts.get("unit_recall_gaps", 0))
+            rc4.metric("Unit flashcards due", review_counts.get("unit_due_flashcards", 0))
+        except Exception:
+            pass
+    else:
+        st.caption("No unit study pack generated yet.")
+
+    action = dashboard.get("recommended_action") or {}
+    st.info(f"**Recommended:** {action.get('label', '')} — {action.get('reason', '')}")
+    if action.get("key") == "process_incomplete_sources":
+        st.caption("Process incomplete sources from the **Pipeline** page.")
+
+    source_rows = []
+    for source in dashboard.get("sources") or []:
+        source_rows.append(
+            {
+                "Source": source.get("source_id", ""),
+                "Title": source.get("title", ""),
+                "Status": source.get("status", ""),
+                "Study pack": "yes" if source.get("has_study_pack") else "no",
+                "Next action": source.get("recommended_action", ""),
+                "Study guide": "yes" if source.get("final_study_guide_path") else "no",
+                "Flashcards": "yes" if source.get("flashcards_path") else "no",
+                "Active recall": "yes" if source.get("active_recall_path") else "no",
+            }
+        )
+    if source_rows:
+        st.dataframe(source_rows, use_container_width=True)
+    else:
+        st.info("No sources in this unit yet.")
+
+    for warning in dashboard.get("warnings") or []:
+        st.warning(warning)
+
+    dash_col1, dash_col2 = st.columns(2)
+    with dash_col1:
+        if st.button("Export unit dashboard", key=f"su_export_dash_{unit_id}"):
+            try:
+                result = export_unit_dashboard(course_name, unit_id)
+                st.success(f"Exported: `{result['markdown_path']}`")
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+    with dash_col2:
+        if st.button("Start unit study session", key=f"su_start_session_{unit_id}"):
+            try:
+                result = start_study_session(course_name, limit=10, unit_id=unit_id)
+                st.session_state[f"study_session_{course_name}"] = (
+                    get_latest_study_session(course_name)
+                )
+                st.success(
+                    f"Started unit session `{result['session_id']}` with "
+                    f"{result['item_count']} items. Open **Study Session** to continue."
+                )
+                if result.get("warning"):
+                    st.warning(result["warning"])
+            except Exception as exc:
+                _show_exception(exc)
+        plan_overwrite = st.checkbox(
+            "Overwrite unit review plan",
+            value=False,
+            key=f"su_plan_overwrite_{unit_id}",
+        )
+        if st.button("Generate unit review plan", key=f"su_gen_plan_{unit_id}"):
+            try:
+                result = generate_unit_review_plan(
+                    course_name,
+                    unit_id,
+                    overwrite=plan_overwrite,
+                )
+                st.success(f"Plan written: `{result['markdown_path']}`")
+                st.rerun()
+            except UnitReviewPlanExistsError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    st.subheader("Unit Synthesis Packet")
+    st.warning(
+        "This packet is meant for manual use with a stronger AI. "
+        "StudyForge does not call external AI here."
+    )
+    synth_include_state = st.checkbox(
+        "Include learning state",
+        value=True,
+        key=f"su_synth_state_{unit_id}",
+    )
+    synth_overwrite = st.checkbox(
+        "Overwrite synthesis packet",
+        value=False,
+        key=f"su_synth_overwrite_{unit_id}",
+    )
+    if st.button("Export synthesis packet", key=f"su_synth_export_{unit_id}"):
+        try:
+            result = build_unit_synthesis_packet(
+                course_name,
+                unit_id,
+                include_learning_state=synth_include_state,
+                overwrite=synth_overwrite,
+            )
+            st.success(f"Packet exported: `{result['packet_path']}`")
+            if result.get("warnings"):
+                for warning in result["warnings"]:
+                    st.warning(warning)
+            st.rerun()
+        except UnitSynthesisPacketExistsError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    try:
+        course_path = resolve_course_path(course_name)
+        synth_md, _ = get_unit_synthesis_packet_paths(course_path, unit_id)
+        if synth_md.is_file():
+            st.caption(f"Synthesis packet: `{synth_md}`")
+            with st.expander("Synthesis packet preview", expanded=False):
+                st.text_area(
+                    "Packet Markdown",
+                    read_text_preview(synth_md, max_chars=12000),
+                    height=280,
+                    key=f"su_synth_preview_{unit_id}",
+                )
+    except Exception:
+        pass
+
+    st.subheader("Import Unit Synthesis")
+    st.caption(
+        "Paste the unified synthesis from ChatGPT/Gemini after using the export packet. "
+        "StudyForge stores a new version each time; older versions are kept."
+    )
+    synth_upload = st.file_uploader(
+        "Upload synthesis (.md or .txt)",
+        type=["md", "txt"],
+        key=f"su_synth_upload_{unit_id}",
+    )
+    synth_paste = st.text_area(
+        "Or paste synthesis text",
+        height=200,
+        key=f"su_synth_paste_{unit_id}",
+    )
+    synth_name = st.text_input(
+        "Synthesizer name",
+        value="ChatGPT",
+        key=f"su_synth_name_{unit_id}",
+    )
+    synth_notes = st.text_input(
+        "Notes (optional)",
+        key=f"su_synth_notes_{unit_id}",
+    )
+    if st.button("Import synthesis", key=f"su_synth_import_{unit_id}"):
+        try:
+            has_file = synth_upload is not None
+            has_paste = bool(synth_paste.strip())
+            if has_file and has_paste:
+                st.error("Provide either a file upload or pasted text, not both.")
+            elif not has_file and not has_paste:
+                st.error("Upload a file or paste synthesis text.")
+            else:
+                if has_file:
+                    content = synth_upload.read().decode("utf-8")
+                    result = import_unit_synthesis(
+                        course_name,
+                        unit_id,
+                        synthesis_text=content,
+                        synthesizer_name=synth_name,
+                        notes=synth_notes or None,
+                    )
+                else:
+                    result = import_unit_synthesis(
+                        course_name,
+                        unit_id,
+                        synthesis_text=synth_paste,
+                        synthesizer_name=synth_name,
+                        notes=synth_notes or None,
+                    )
+                st.success(
+                    f"Imported `{result['synthesis_id']}` "
+                    f"(quality: {result.get('quality_status', '')})."
+                )
+                if result.get("warnings"):
+                    for warning in result["warnings"]:
+                        st.warning(warning)
+                st.rerun()
+        except Exception as exc:
+            _show_exception(exc)
+
+    latest_path = dashboard.get("latest_synthesis_path", "")
+    if latest_path and Path(latest_path).is_file():
+        with st.expander("Latest synthesis preview", expanded=False):
+            st.text_area(
+                "Synthesis Markdown",
+                read_text_preview(Path(latest_path), max_chars=12000),
+                height=280,
+                key=f"su_synth_latest_{unit_id}",
+            )
+
+    st.subheader("Unit Study Pack")
+    if not dashboard.get("has_unit_synthesis"):
+        st.info("Import a unit synthesis before generating a unit study pack.")
+    else:
+        pack_overwrite = st.checkbox(
+            "Overwrite unit study pack",
+            value=False,
+            key=f"su_pack_overwrite_{unit_id}",
+        )
+        diag_col, gen_col = st.columns(2)
+        with diag_col:
+            if st.button("Diagnose unit synthesis for study pack", key=f"su_pack_diag_{unit_id}"):
+                try:
+                    diag = diagnose_unit_study_pack(course_name, unit_id)
+                    st.write(
+                        f"Quality: **{diag['quality'].get('quality_status', '')}** "
+                        f"({diag['quality'].get('total_extracted_words', 0)} words)"
+                    )
+                    for warning in diag.get("warnings") or []:
+                        st.warning(warning)
+                except Exception as exc:
+                    _show_exception(exc)
+        with gen_col:
+            if st.button("Generate unit study pack", key=f"su_pack_gen_{unit_id}"):
+                try:
+                    result = generate_unit_study_pack(
+                        course_name,
+                        unit_id,
+                        overwrite=pack_overwrite,
+                    )
+                    st.success(
+                        f"Generated unit study pack (quality: "
+                        f"{result.get('quality_status', '')}, "
+                        f"{result.get('flashcard_count', 0)} flashcards)."
+                    )
+                    if result.get("warnings"):
+                        for warning in result["warnings"]:
+                            st.warning(warning)
+                    st.rerun()
+                except UnitStudyPackOutputExistsError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    _show_exception(exc)
+
+        guide_path = dashboard.get("latest_unit_study_guide_path", "")
+        if guide_path and Path(guide_path).is_file():
+            with st.expander("Unit study guide preview", expanded=False):
+                st.text_area(
+                    "Unit study guide",
+                    read_text_preview(Path(guide_path), max_chars=12000),
+                    height=280,
+                    key=f"su_pack_guide_{unit_id}",
+                )
+        paths_lines = []
+        for label, key in (
+            ("Flashcards", "latest_unit_flashcards_path"),
+            ("Active recall", "latest_unit_active_recall_path"),
+            ("Manifest", "latest_unit_study_pack_manifest_path"),
+        ):
+            p = dashboard.get(key, "")
+            if p:
+                paths_lines.append(f"- **{label}:** `{p}`")
+        if paths_lines:
+            st.caption("Unit study pack paths:\n" + "\n".join(paths_lines))
+
+    try:
+        course_path = resolve_course_path(course_name)
+        md_path, _ = get_unit_dashboard_paths(course_path, unit_id)
+        if md_path.is_file():
+            with st.expander("Exported dashboard preview", expanded=False):
+                st.text_area(
+                    "Dashboard Markdown",
+                    read_text_preview(md_path, max_chars=12000),
+                    height=240,
+                    key=f"su_dash_preview_{unit_id}",
+                )
+    except Exception:
+        pass
+
+    st.subheader("Edit unit")
+    status_options = ["active", "paused", "completed", "archived"]
+    current_status = str(picked_unit.get("status", "active")).lower()
+    if current_status not in status_options:
+        current_status = "active"
+    new_status = st.selectbox(
+        "Status",
+        status_options,
+        index=status_options.index(current_status),
+        key=f"su_status_{unit_id}",
+    )
+    if st.button("Update status", key=f"su_update_status_{unit_id}"):
+        try:
+            update_study_unit(course_name, unit_id, status=new_status)
+            st.success(f"Updated `{unit_id}` status to {new_status}.")
+            st.rerun()
+        except (InvalidStudyUnitStatusError, StudyUnitNotFoundError) as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    available_to_add = [
+        label
+        for label, sid in zip(source_labels, source_ids)
+        if sid not in picked_unit.get("source_ids", [])
+    ]
+    if available_to_add:
+        to_add = st.multiselect(
+            "Add sources",
+            options=available_to_add,
+            key=f"su_add_{unit_id}",
+        )
+        if st.button("Add selected sources", key=f"su_add_btn_{unit_id}"):
+            try:
+                add_ids = [
+                    source_ids[source_labels.index(label)]
+                    for label in to_add
+                ]
+                add_sources_to_unit(course_name, unit_id, add_ids)
+                st.success("Sources added.")
+                st.rerun()
+            except InvalidSourceIdError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    in_unit_labels = [
+        label
+        for label, sid in zip(source_labels, source_ids)
+        if sid in picked_unit.get("source_ids", [])
+    ]
+    if in_unit_labels:
+        to_remove = st.multiselect(
+            "Remove sources",
+            options=in_unit_labels,
+            key=f"su_remove_{unit_id}",
+        )
+        if st.button("Remove selected sources", key=f"su_remove_btn_{unit_id}"):
+            try:
+                remove_ids = [
+                    source_ids[source_labels.index(label)]
+                    for label in to_remove
+                ]
+                remove_sources_from_unit(course_name, unit_id, remove_ids)
+                st.success("Sources removed.")
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+
+
+def page_active_recall(course_name: str | None) -> None:
+    _render_page_intro("active_recall")
+    if not _require_course():
+        return
 
     sources = _source_options(course_name)
     source_id = _select_source(sources, key="ar_source")
@@ -1854,7 +2553,9 @@ def page_active_recall(course_name: str | None) -> None:
         summary = summarize_active_recall_log(course_name, source_id)
     except ActiveRecallNotReadyError as exc:
         st.warning(str(exc))
-        st.info("Generate a study pack on the **Pipeline** page first.")
+        st.info(
+            "Generate a study pack from the **Pipeline** page before using Active Recall."
+        )
         return
     except Exception as exc:
         _show_exception(exc)
@@ -1945,15 +2646,9 @@ def page_active_recall(course_name: str | None) -> None:
 
 
 def page_flashcards(course_name: str | None) -> None:
-    st.header("Flashcards")
+    _render_page_intro("flashcards")
     if not _require_course():
         return
-
-    st.caption(
-        "Review generated flashcards and self-grade (no AI). "
-        "Lightweight due scheduling assigns simple review intervals by grade — "
-        "not full Anki/SM-2. Due cards appear in review plans and study sessions."
-    )
 
     sources = _source_options(course_name)
     source_id = _select_source(sources, key="fc_source")
@@ -1965,7 +2660,9 @@ def page_flashcards(course_name: str | None) -> None:
         summary = summarize_flashcard_reviews(course_name, source_id)
     except FlashcardsNotReadyError as exc:
         st.warning(str(exc))
-        st.info("Generate a study pack on the **Pipeline** page first.")
+        st.info(
+            "Generate a study pack from the **Pipeline** page before using Flashcards."
+        )
         return
     except Exception as exc:
         _show_exception(exc)
@@ -2100,14 +2797,760 @@ def _weak_active_recall_attempts(course_name: str, source_id: str) -> list[dict]
     return list(reversed(attempts))
 
 
-def page_review_tracker(course_name: str | None) -> None:
-    st.header("Review Tracker")
+def page_mock_tests(course_name: str | None) -> None:
+    _render_page_intro("mock_tests")
     if not _require_course():
         return
 
-    st.caption(
-        "Track mistakes and weak points from active recall (deterministic, no AI)."
+    st.subheader("Generate Mock Test")
+    gen_scope = st.radio(
+        "Scope",
+        ["Source", "Study unit"],
+        horizontal=True,
+        key="mt_gen_scope",
     )
+    gen_source_id: str | None = None
+    gen_unit_id: str | None = None
+    if gen_scope == "Source":
+        sources = _source_options(course_name)
+        gen_source_id = _select_source(sources, key="mt_gen_source")
+        if not gen_source_id:
+            return
+    else:
+        units = [
+            unit
+            for unit in list_study_units(course_name)
+            if str(unit.get("status", "")).lower() != "archived"
+        ]
+        if not units:
+            st.info("No study units yet. Create one on **Study Units**.")
+            return
+        unit_labels = [
+            f"{unit.get('unit_id', '')} — {unit.get('title', '')}"
+            for unit in units
+        ]
+        unit_map = {label: unit for label, unit in zip(unit_labels, units)}
+        picked = st.selectbox("Study unit", unit_labels, key="mt_gen_unit")
+        gen_unit_id = unit_map[picked].get("unit_id")
+
+    question_count = st.number_input(
+        "Question count",
+        min_value=1,
+        max_value=50,
+        value=20,
+        step=1,
+        key="mt_question_count",
+    )
+    include_flashcards = st.checkbox(
+        "Include flashcards",
+        value=True,
+        key="mt_include_flashcards",
+    )
+    if st.button("Generate mock test", key="mt_generate"):
+        try:
+            if gen_scope == "Source":
+                result = generate_mock_test(
+                    course_name,
+                    "source",
+                    source_id=gen_source_id,
+                    question_count=int(question_count),
+                    include_flashcards=include_flashcards,
+                )
+            else:
+                result = generate_mock_test(
+                    course_name,
+                    "unit",
+                    unit_id=gen_unit_id,
+                    question_count=int(question_count),
+                    include_flashcards=include_flashcards,
+                )
+            st.success(
+                f"Generated `{result['mock_test_id']}` with "
+                f"{result['question_count']} questions."
+            )
+            st.code(result["markdown_path"])
+            st.session_state["mt_last_generated_path"] = result["markdown_path"]
+            st.session_state["mt_last_mock_test_id"] = result["mock_test_id"]
+            st.rerun()
+        except MockTestNotReadyError as exc:
+            st.warning(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    preview_path = st.session_state.get("mt_last_generated_path", "")
+    if preview_path and Path(preview_path).is_file():
+        with st.expander("Generated mock test preview", expanded=False):
+            st.text_area(
+                "Mock test Markdown",
+                read_text_preview(Path(preview_path), max_chars=16000),
+                height=320,
+                key="mt_preview",
+            )
+
+    st.subheader("Detailed Grading")
+    mock_tests = list_mock_tests(course_name)
+    if not mock_tests:
+        st.info("Generate a mock test above to start detailed grading.")
+    else:
+        grade_labels = [
+            f"{test.get('mock_test_id', '')} "
+            f"({test.get('question_count', 0)} q, {test.get('scope', '')})"
+            for test in mock_tests
+        ]
+        grade_map = {label: test for label, test in zip(grade_labels, mock_tests)}
+        picked_grade = st.selectbox(
+            "Mock test to grade",
+            grade_labels,
+            key="mt_grade_pick",
+        )
+        grade_test = grade_map[picked_grade]
+        grade_mock_id = grade_test.get("mock_test_id", "")
+
+        try:
+            grade_mock_data = load_mock_test_json(course_name, grade_mock_id)
+            grade_summary = summarize_mock_test_grading(course_name, grade_mock_id)
+            questions = grade_mock_data.get("questions", [])
+
+            g1, g2, g3, g4 = st.columns(4)
+            g1.metric(
+                "Graded",
+                f"{grade_summary.get('graded_count', 0)}/"
+                f"{grade_summary.get('question_count', 0)}",
+            )
+            g2.metric("Percent", f"{grade_summary.get('percent', 0)}%")
+            g3.metric("Correct", grade_summary.get("correct", 0))
+            g4.metric("Needs review", grade_summary.get("needs_review_count", 0))
+
+            if grade_summary.get("finalized"):
+                st.caption(
+                    f"Finalized as `{grade_summary.get('finalized_attempt_id', '')}`"
+                )
+
+            if questions:
+                q_labels = [
+                    f"{q.get('mock_question_id', '')} — "
+                    f"{str(q.get('question', ''))[:50]}"
+                    for q in questions
+                ]
+                q_map = {label: q for label, q in zip(q_labels, questions)}
+                picked_q = st.selectbox("Question", q_labels, key="mt_grade_question")
+                current_q = q_map[picked_q]
+                st.write("**Question:**", current_q.get("question", ""))
+                expected = current_q.get("expected_answer", "")
+                if expected:
+                    st.caption(f"Expected answer: {expected}")
+                else:
+                    st.caption("Expected answer: see answer key in mock test Markdown.")
+
+                user_answer = st.text_area(
+                    "Your answer",
+                    key=f"mt_g_ans_{grade_mock_id}_{current_q.get('mock_question_id', '')}",
+                )
+                q_grade = st.selectbox(
+                    "Grade",
+                    ["correct", "partial", "wrong", "skipped"],
+                    key=f"mt_g_grade_{grade_mock_id}_{current_q.get('mock_question_id', '')}",
+                )
+                q_notes = st.text_input(
+                    "Notes",
+                    key=f"mt_g_notes_{grade_mock_id}_{current_q.get('mock_question_id', '')}",
+                )
+                create_mistake = st.checkbox(
+                    "Create mistake",
+                    key=f"mt_g_mist_{current_q.get('mock_question_id', '')}",
+                )
+                create_weak = st.checkbox(
+                    "Create weak point",
+                    key=f"mt_g_weak_{current_q.get('mock_question_id', '')}",
+                )
+                weak_concept = st.text_input(
+                    "Weak point concept (optional)",
+                    key=f"mt_g_wc_{current_q.get('mock_question_id', '')}",
+                )
+                if st.button("Save question grade", key="mt_save_question_grade"):
+                    try:
+                        result = record_mock_question_result(
+                            course_name,
+                            grade_mock_id,
+                            current_q["mock_question_id"],
+                            q_grade,
+                            user_answer=user_answer or None,
+                            notes=q_notes or None,
+                            create_mistake=create_mistake,
+                            create_weak_point=create_weak,
+                            weak_point_concept=weak_concept or None,
+                        )
+                        st.success(
+                            f"Saved grade `{result['grade']}` for "
+                            f"`{result['mock_question_id']}`"
+                        )
+                        if result.get("applied"):
+                            st.caption(f"Applied: {', '.join(result['applied'])}")
+                        st.rerun()
+                    except (
+                        MockTestGradingAlreadyFinalizedError,
+                        MockTestQuestionNotFoundError,
+                        InvalidMockTestGradeError,
+                    ) as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        _show_exception(exc)
+
+            missed = grade_summary.get("missed_questions") or []
+            if missed:
+                with st.expander("Missed / partial questions", expanded=False):
+                    for item in missed:
+                        st.markdown(
+                            f"- **{item.get('mock_question_id', '')}** "
+                            f"({item.get('grade', '')}): "
+                            f"{str(item.get('question', ''))[:80]}"
+                        )
+
+            finalize_notes = st.text_input(
+                "Finalize notes",
+                key="mt_finalize_notes",
+            )
+            col_f, col_e = st.columns(2)
+            with col_f:
+                if st.button("Finalize grading as mock attempt", key="mt_finalize"):
+                    try:
+                        result = finalize_mock_test_grading(
+                            course_name,
+                            grade_mock_id,
+                            notes=finalize_notes or None,
+                        )
+                        st.success(
+                            f"Finalized `{result['attempt_id']}`: "
+                            f"{result['score_correct']}/{result['score_total']} "
+                            f"({result['percent']}%)"
+                        )
+                        st.rerun()
+                    except (MockTestGradingAlreadyFinalizedError, ValueError) as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        _show_exception(exc)
+            with col_e:
+                review_overwrite = st.checkbox(
+                    "Overwrite review",
+                    value=False,
+                    key="mt_review_overwrite",
+                )
+                if st.button("Export mock review", key="mt_export_review"):
+                    try:
+                        result = export_mock_test_review(
+                            course_name,
+                            grade_mock_id,
+                            overwrite=review_overwrite,
+                        )
+                        st.session_state["mt_last_review_path"] = result["review_path"]
+                        st.success(f"Review: `{result['review_path']}`")
+                        st.rerun()
+                    except MockTestReviewExistsError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        _show_exception(exc)
+
+            review_path = st.session_state.get("mt_last_review_path", "")
+            if review_path and Path(review_path).is_file():
+                with st.expander("Review preview", expanded=False):
+                    st.text_area(
+                        "Mock test review",
+                        read_text_preview(Path(review_path), max_chars=12000),
+                        height=280,
+                        key="mt_review_preview",
+                    )
+            elif grade_summary.get("graded_count", 0) > 0:
+                with st.expander("Review preview (live)", expanded=False):
+                    st.text_area(
+                        "Mock test review",
+                        build_mock_test_review_markdown(course_name, grade_mock_id),
+                        height=280,
+                        key="mt_review_preview_live",
+                    )
+        except MockTestNotFoundError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.subheader("Record Attempt")
+    mock_test_id = st.text_input(
+        "Mock test ID",
+        value=st.session_state.get("mt_last_mock_test_id", ""),
+        key="mt_record_id",
+    )
+    record_scope = st.radio(
+        "Attempt scope",
+        ["source", "unit"],
+        horizontal=True,
+        key="mt_record_scope",
+    )
+    record_source_id: str | None = None
+    record_unit_id: str | None = None
+    if record_scope == "source":
+        sources = _source_options(course_name)
+        record_source_id = _select_source(sources, key="mt_record_source")
+        if not record_source_id:
+            return
+    else:
+        units = [
+            unit
+            for unit in list_study_units(course_name)
+            if str(unit.get("status", "")).lower() != "archived"
+        ]
+        if not units:
+            st.info("No study units available.")
+            return
+        unit_labels = [
+            f"{unit.get('unit_id', '')} — {unit.get('title', '')}"
+            for unit in units
+        ]
+        unit_map = {label: unit for label, unit in zip(unit_labels, units)}
+        picked = st.selectbox("Unit for attempt", unit_labels, key="mt_record_unit")
+        record_unit_id = unit_map[picked].get("unit_id")
+
+    score_col, total_col = st.columns(2)
+    with score_col:
+        score_correct = st.number_input(
+            "Score correct",
+            min_value=0,
+            value=0,
+            step=1,
+            key="mt_score_correct",
+        )
+    with total_col:
+        score_total = st.number_input(
+            "Score total",
+            min_value=1,
+            value=20,
+            step=1,
+            key="mt_score_total",
+        )
+    attempt_notes = st.text_input("Notes", key="mt_attempt_notes")
+    weak_topics_text = st.text_input(
+        "Weak topics (comma-separated)",
+        key="mt_weak_topics",
+    )
+    if st.button("Save attempt", key="mt_save_attempt"):
+        try:
+            if not mock_test_id.strip():
+                st.error("Enter a mock test ID.")
+            else:
+                topics = [
+                    part.strip()
+                    for part in weak_topics_text.split(",")
+                    if part.strip()
+                ]
+                result = record_mock_test_attempt(
+                    course_name,
+                    mock_test_id.strip(),
+                    record_scope,
+                    record_source_id,
+                    record_unit_id,
+                    int(score_correct),
+                    int(score_total),
+                    notes=attempt_notes or None,
+                    weak_topics=topics or None,
+                )
+                st.success(
+                    f"Saved {result['attempt_id']}: "
+                    f"{result['score_correct']}/{result['score_total']} "
+                    f"({result['percent']}%)"
+                )
+                if result.get("weak_point_ids"):
+                    st.caption(
+                        "Weak points: " + ", ".join(result["weak_point_ids"])
+                    )
+                st.rerun()
+        except (InvalidMockTestScoreError, InvalidMockTestScopeError) as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    st.subheader("Summary")
+    try:
+        summary = summarize_mock_test_attempts(course_name)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    s1, s2 = st.columns(2)
+    s1.metric("Attempts", summary.get("attempt_count", 0))
+    s2.metric("Average score %", summary.get("average_percent", 0.0))
+    latest = summary.get("latest_attempt")
+    if latest:
+        st.caption(
+            f"Latest: `{latest.get('mock_test_id')}` — "
+            f"{latest.get('score_correct')}/{latest.get('score_total')} "
+            f"({latest.get('percent')}%)"
+        )
+    recent = summary.get("recent_attempts") or []
+    if recent:
+        rows = []
+        for attempt in recent:
+            rows.append(
+                {
+                    "Attempt": attempt.get("attempt_id", ""),
+                    "Mock test": attempt.get("mock_test_id", ""),
+                    "Score": f"{attempt.get('score_correct')}/{attempt.get('score_total')}",
+                    "Percent": attempt.get("percent", ""),
+                    "Date": attempt.get("date_recorded", ""),
+                }
+            )
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.info("No mock test attempts recorded yet.")
+
+
+def page_exam_prep(course_name: str | None) -> None:
+    _render_page_intro("exam_prep")
+    if not _require_course():
+        return
+
+    st.subheader("Exam Targets")
+    targets = list_exam_targets(course_name)
+    if targets:
+        rows = []
+        for target in targets:
+            rows.append(
+                {
+                    "ID": target.get("exam_id", ""),
+                    "Title": target.get("title", ""),
+                    "Date": target.get("exam_date", ""),
+                    "Target %": target.get("target_score", "—"),
+                    "Status": target.get("status", ""),
+                    "Units": ", ".join(target.get("unit_ids", [])),
+                    "Sources": ", ".join(target.get("source_ids", [])),
+                }
+            )
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.info("No exam targets yet. Create one below.")
+
+    with st.expander("Create exam target", expanded=not targets):
+        new_title = st.text_input("Title", key="ep_new_title")
+        new_date = st.text_input("Exam date (YYYY-MM-DD)", key="ep_new_date")
+        new_desc = st.text_input("Description", key="ep_new_desc")
+        new_target = st.number_input(
+            "Target score %",
+            min_value=0,
+            max_value=100,
+            value=80,
+            step=1,
+            key="ep_new_target",
+        )
+        units = [
+            unit
+            for unit in list_study_units(course_name)
+            if str(unit.get("status", "")).lower() != "archived"
+        ]
+        unit_labels = [
+            f"{unit.get('unit_id', '')} — {unit.get('title', '')}" for unit in units
+        ]
+        unit_map = {label: unit for label, unit in zip(unit_labels, units)}
+        picked_units = st.multiselect(
+            "Units",
+            unit_labels,
+            key="ep_new_units",
+        )
+        sources = _source_options(course_name)
+        source_labels = [
+            f"{s.get('id', '')} — {s.get('title', '')}" for s in sources
+        ]
+        source_map = {label: s for label, s in zip(source_labels, sources)}
+        picked_sources = st.multiselect(
+            "Additional sources",
+            source_labels,
+            key="ep_new_sources",
+        )
+        if st.button("Create exam target", key="ep_create"):
+            try:
+                if not new_title.strip() or not new_date.strip():
+                    st.error("Title and exam date are required.")
+                else:
+                    unit_ids = [
+                        unit_map[label].get("unit_id") for label in picked_units
+                    ]
+                    source_ids = [
+                        source_map[label].get("id") for label in picked_sources
+                    ]
+                    target = create_exam_target(
+                        course_name,
+                        new_title.strip(),
+                        new_date.strip(),
+                        description=new_desc or None,
+                        target_score=int(new_target),
+                        unit_ids=unit_ids,
+                        source_ids=source_ids,
+                    )
+                    st.success(f"Created `{target['exam_id']}` — {target['title']}")
+                    st.rerun()
+            except (
+                InvalidExamDateError,
+                InvalidTargetScoreError,
+                InvalidExamUnitIdError,
+                InvalidSourceIdError,
+            ) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    if targets:
+        status_options = ["active", "completed", "archived"]
+        target_labels = [
+            f"{t.get('exam_id', '')} — {t.get('title', '')}" for t in targets
+        ]
+        target_map = {label: t for label, t in zip(target_labels, targets)}
+        picked_label = st.selectbox(
+            "Update exam target",
+            target_labels,
+            key="ep_update_pick",
+        )
+        picked_target = target_map[picked_label]
+        current_status = str(picked_target.get("status", "active")).lower()
+        new_status = st.selectbox(
+            "Status",
+            status_options,
+            index=status_options.index(current_status)
+            if current_status in status_options
+            else 0,
+            key="ep_update_status",
+        )
+        if st.button("Update status", key="ep_update_btn"):
+            try:
+                update_exam_target(
+                    course_name,
+                    picked_target["exam_id"],
+                    status=new_status,
+                )
+                st.success(f"Updated `{picked_target['exam_id']}` to {new_status}.")
+                st.rerun()
+            except (InvalidExamTargetStatusError, ExamTargetNotFoundError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                _show_exception(exc)
+
+    st.subheader("Exam Prep Plan")
+    active_targets = [
+        t for t in targets if str(t.get("status", "")).lower() == "active"
+    ]
+    if not active_targets:
+        st.info("Create an active exam target to generate a prep plan.")
+        return
+
+    plan_labels = [
+        f"{t.get('exam_id', '')} — {t.get('title', '')} ({t.get('exam_date', '')})"
+        for t in active_targets
+    ]
+    plan_map = {label: t for label, t in zip(plan_labels, active_targets)}
+    picked_plan = st.selectbox("Exam target", plan_labels, key="ep_plan_pick")
+    exam_target = plan_map[picked_plan]
+    exam_id = exam_target.get("exam_id", "")
+
+    try:
+        readiness_report = get_exam_readiness_report(course_name, exam_id)
+        readiness = readiness_report.get("readiness", {})
+        st.caption(
+            f"Readiness: {readiness.get('score', 0)}% "
+            f"({readiness.get('status', '')})"
+        )
+    except ExamTargetNotFoundError as exc:
+        st.error(str(exc))
+        return
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    try:
+        state = collect_exam_prep_state(course_name, exam_id)
+        actions = recommend_exam_prep_actions(state)
+    except ExamTargetNotFoundError as exc:
+        st.error(str(exc))
+        return
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    days = state.get("days_until_exam", 0)
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Days remaining", days)
+    p2.metric(
+        "Due flashcards",
+        len(state.get("review", {}).get("due_flashcards") or [])
+        + len(state.get("review", {}).get("due_unit_flashcards") or []),
+    )
+    p3.metric("Mock attempts", state.get("mock_tests", {}).get("attempt_count", 0))
+
+    st.write("**Scope**")
+    st.caption(
+        f"Units: {', '.join(state.get('scope', {}).get('unit_ids', [])) or '(none)'}"
+    )
+    st.caption(
+        f"Sources: {', '.join(state.get('scope', {}).get('source_ids', [])) or '(none)'}"
+    )
+
+    readiness = state.get("readiness", {})
+    review = state.get("review", {})
+    st.write("**Readiness**")
+    st.caption(
+        f"Incomplete sources: {len(readiness.get('incomplete_sources') or [])} · "
+        f"Units without synthesis: {len(readiness.get('units_without_synthesis') or [])} · "
+        f"Units without pack: {len(readiness.get('units_without_unit_pack') or [])}"
+    )
+    st.write("**Review summary**")
+    st.caption(
+        f"Recall gaps: "
+        f"{len(review.get('active_recall_needs_review') or []) + len(review.get('unit_recall_needs_review') or [])} · "
+        f"Mistakes: {len(review.get('open_mistakes') or [])} · "
+        f"Weak points: {len(review.get('open_weak_points') or [])}"
+    )
+    mock_tests = state.get("mock_tests", {})
+    if mock_tests.get("latest_score") is not None:
+        st.caption(
+            f"Latest mock score: {mock_tests.get('latest_score')}% "
+            f"(target: {exam_target.get('target_score', '—')}%)"
+        )
+
+    if actions:
+        primary = actions[0]
+        st.info(f"**Recommended:** {primary.get('label', '')} — {primary.get('reason', '')}")
+
+    st.subheader("Exam Readiness")
+    readiness_status = str(readiness.get("status", ""))
+    r1, r2 = st.columns(2)
+    r1.metric("Readiness score", f"{readiness.get('score', 0)}%")
+    r2.metric("Status", readiness_status.replace("_", " "))
+    if readiness_status == "ready":
+        st.success("You look ready on paper — keep reviewing until exam day.")
+    elif readiness_status == "needs_review":
+        st.info("Some review work remains before exam day.")
+    elif readiness_status == "at_risk":
+        st.warning("Readiness is at risk — focus on the blockers below.")
+    else:
+        st.error("Readiness is low — address blockers before the exam.")
+
+    breakdown = readiness.get("breakdown", {})
+    st.write("**Breakdown**")
+    st.table(
+        {
+            "Area": [
+                "Material readiness",
+                "Review load",
+                "Mock tests",
+                "Time pressure",
+            ],
+            "Score": [
+                f"{breakdown.get('readiness', 0)}/30",
+                f"{breakdown.get('review_load', 0)}/25",
+                f"{breakdown.get('mock_tests', 0)}/30",
+                f"{breakdown.get('time', 0)}/15",
+            ],
+        }
+    )
+
+    blockers = readiness.get("blockers") or []
+    if blockers:
+        st.write("**Blockers**")
+        for blocker in blockers:
+            st.markdown(f"- {blocker}")
+
+    readiness_recs = readiness.get("recommendations") or []
+    if readiness_recs:
+        st.write("**Recommendations**")
+        for recommendation in readiness_recs:
+            st.markdown(f"- {recommendation}")
+
+    readiness_overwrite = st.checkbox(
+        "Overwrite existing readiness report",
+        value=False,
+        key="ep_readiness_overwrite",
+    )
+    if st.button("Export readiness report", key="ep_export_readiness"):
+        try:
+            result = export_exam_readiness_report(
+                course_name,
+                exam_id,
+                overwrite=readiness_overwrite,
+            )
+            st.success(f"Readiness report written: `{result['markdown_path']}`")
+            st.session_state["ep_last_readiness_path"] = result["markdown_path"]
+            st.rerun()
+        except ExamReadinessReportExistsError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    readiness_path = st.session_state.get("ep_last_readiness_path", "")
+    if readiness_path and Path(readiness_path).is_file():
+        with st.expander("Readiness report preview", expanded=False):
+            st.text_area(
+                "Exam readiness report",
+                read_text_preview(Path(readiness_path), max_chars=12000),
+                height=280,
+                key="ep_readiness_preview",
+            )
+    else:
+        preview_md = build_exam_readiness_markdown(readiness_report)
+        with st.expander("Readiness report preview", expanded=False):
+            st.text_area(
+                "Exam readiness report (preview)",
+                preview_md,
+                height=280,
+                key="ep_readiness_preview_live",
+            )
+
+    if st.button("Start exam study session", key="ep_start_session"):
+        try:
+            summary = start_study_session(
+                course_name,
+                limit=10,
+                exam_id=exam_id,
+            )
+            session_key = f"study_session_{course_name}"
+            st.session_state[session_key] = get_latest_study_session(course_name)
+            msg = (
+                f"Started exam session `{summary['session_id']}` with "
+                f"{summary['item_count']} items. Open **Study Session** to continue."
+            )
+            if summary.get("warning"):
+                st.warning(summary["warning"])
+            st.success(msg)
+            st.rerun()
+        except ExamTargetNotFoundError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    plan_overwrite = st.checkbox("Overwrite existing plan", value=False, key="ep_overwrite")
+    if st.button("Generate exam prep plan", key="ep_generate_plan"):
+        try:
+            result = generate_exam_prep_plan(
+                course_name,
+                exam_id,
+                overwrite=plan_overwrite,
+            )
+            st.success(f"Plan written: `{result['markdown_path']}`")
+            st.session_state["ep_last_plan_path"] = result["markdown_path"]
+            st.rerun()
+        except ExamPrepPlanExistsError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    plan_path = st.session_state.get("ep_last_plan_path", "")
+    if plan_path and Path(plan_path).is_file():
+        with st.expander("Plan preview", expanded=False):
+            st.text_area(
+                "Exam prep plan",
+                read_text_preview(Path(plan_path), max_chars=16000),
+                height=320,
+                key="ep_plan_preview",
+            )
+
+
+def page_review_tracker(course_name: str | None) -> None:
+    _render_page_intro("review_tracker")
+    if not _require_course():
+        return
 
     st.subheader("Review Session Planner")
     plan_limit = st.number_input(
@@ -2133,8 +3576,8 @@ def page_review_tracker(course_name: str | None) -> None:
             st.write(f"**Mistakes:** {summary['mistake_count']}")
             st.write(f"**Weak points:** {summary['weak_point_count']}")
             st.write(f"**Active recall redo:** {summary['active_recall_review_count']}")
-        if summary.get("flashcards_due_count") is not None:
-            st.write(f"**Flashcards due:** {summary['flashcards_due_count']}")
+            if summary.get("flashcards_due_count") is not None:
+                st.write(f"**Flashcards due:** {summary['flashcards_due_count']}")
             st.write(f"**Top priorities:** {summary['priority_count']}")
             st.code(summary["markdown_path"])
             st.rerun()
@@ -2354,25 +3797,82 @@ def page_review_tracker(course_name: str | None) -> None:
 
 
 def page_study_session(course_name: str | None) -> None:
-    st.header("Study Session")
+    _render_page_intro("study_session")
     if not _require_course():
         return
 
-    st.caption(
-        "Work through today's review priorities and unanswered active recall questions "
-        "in one place: recall gaps, mistakes, and weak points. Self-graded only (no AI)."
-    )
-
     session_key = f"study_session_{course_name}"
     limit = st.number_input("Item limit", min_value=1, max_value=30, value=10, step=1)
+    scope_choice = st.radio(
+        "Session scope",
+        ["Whole course", "Study unit", "Exam target"],
+        horizontal=True,
+        key=f"ss_scope_{course_name}",
+    )
+    selected_unit_id: str | None = None
+    selected_exam_id: str | None = None
+    if scope_choice == "Study unit":
+        eligible_units = [
+            unit
+            for unit in list_study_units(course_name)
+            if str(unit.get("status", "")).lower() != "archived"
+        ]
+        if not eligible_units:
+            st.info("No active study units. Create one on **Study Units**.")
+        else:
+            unit_labels = [
+                f"{unit.get('unit_id', '')} — {unit.get('title', '')}"
+                for unit in eligible_units
+            ]
+            unit_map = {label: unit for label, unit in zip(unit_labels, eligible_units)}
+            picked = st.selectbox(
+                "Study unit",
+                unit_labels,
+                key=f"ss_unit_pick_{course_name}",
+            )
+            selected_unit_id = unit_map[picked].get("unit_id")
+    elif scope_choice == "Exam target":
+        active_exams = list_active_exam_targets(course_name)
+        if not active_exams:
+            st.info("No active exam targets. Create one on **Exam Prep**.")
+        else:
+            exam_labels = [
+                f"{exam.get('exam_id', '')} — {exam.get('title', '')}"
+                for exam in active_exams
+            ]
+            exam_map = {label: exam for label, exam in zip(exam_labels, active_exams)}
+            picked_exam = st.selectbox(
+                "Exam target",
+                exam_labels,
+                key=f"ss_exam_pick_{course_name}",
+            )
+            selected_exam_id = exam_map[picked_exam].get("exam_id")
 
     if st.button("Start new session", key=f"ss_start_{course_name}"):
         try:
-            summary = start_study_session(course_name, limit=int(limit))
-            session = get_latest_study_session(course_name)
-            st.session_state[session_key] = session
-            st.success(f"Started `{summary['session_id']}` with {summary['item_count']} items.")
-            st.rerun()
+            unit_id = selected_unit_id if scope_choice == "Study unit" else None
+            exam_id = selected_exam_id if scope_choice == "Exam target" else None
+            if scope_choice == "Study unit" and not unit_id:
+                st.warning("Select a study unit to start a unit session.")
+            elif scope_choice == "Exam target" and not exam_id:
+                st.warning("Select an exam target to start an exam session.")
+            else:
+                summary = start_study_session(
+                    course_name,
+                    limit=int(limit),
+                    unit_id=unit_id,
+                    exam_id=exam_id,
+                )
+                session = get_latest_study_session(course_name)
+                st.session_state[session_key] = session
+                msg = (
+                    f"Started `{summary['session_id']}` with "
+                    f"{summary['item_count']} items."
+                )
+                if summary.get("warning"):
+                    st.warning(summary["warning"])
+                st.success(msg)
+                st.rerun()
         except Exception as exc:
             _show_exception(exc)
 
@@ -2384,9 +3884,8 @@ def page_study_session(course_name: str | None) -> None:
 
     if not session:
         st.info(
-            "No study session yet. Click **Start new session** when you have open "
-            "mistakes, weak points, recall gaps, or unanswered active recall questions "
-            "from a study pack."
+            "Nothing is due right now, or no session started yet. Click **Start new session** "
+            "when you have review items, or review flashcards on **Flashcards**."
         )
         return
 
@@ -2396,6 +3895,22 @@ def page_study_session(course_name: str | None) -> None:
     completed_ids = {c.get("session_item_id") for c in completed}
 
     st.subheader("Current session")
+    if session.get("scope") == "unit":
+        st.caption(
+            f"Unit session: {session.get('unit_id', '')} — "
+            f"{session.get('unit_title', '')}"
+        )
+    elif session.get("scope") == "exam":
+        st.caption(
+            f"Exam session: {session.get('exam_id', '')} — "
+            f"{session.get('exam_title', '')}"
+        )
+        st.caption(
+            f"Date: {session.get('exam_date', '')} · "
+            f"Target: {session.get('target_score', '—')}%"
+        )
+    else:
+        st.caption("Course-wide session")
     st.write(f"**ID:** `{session_id}` — **Status:** {session.get('status', '')}")
     st.progress(
         len(completed_ids) / len(items) if items else 0.0,
@@ -2437,8 +3952,17 @@ def page_study_session(course_name: str | None) -> None:
     item_type = current.get("type", "")
     result_options: list[str]
 
-    if item_type in ("active_recall", "active_recall_unanswered"):
-        if item_type == "active_recall_unanswered":
+    if item_type in (
+        "active_recall",
+        "active_recall_unanswered",
+        "unit_active_recall",
+        "unit_active_recall_unanswered",
+    ):
+        if item_type == "unit_active_recall_unanswered":
+            st.subheader("Unanswered unit active recall question")
+        elif item_type == "unit_active_recall":
+            st.subheader("Unit active recall")
+        elif item_type == "active_recall_unanswered":
             st.subheader("Unanswered active recall question")
         else:
             st.subheader("Active recall")
@@ -2472,8 +3996,17 @@ def page_study_session(course_name: str | None) -> None:
                 weak_point_concept=weak_concept or None,
             )
 
-    elif item_type in ("flashcard", "flashcard_unreviewed"):
-        if item_type == "flashcard_unreviewed":
+    elif item_type in (
+        "flashcard",
+        "flashcard_unreviewed",
+        "unit_flashcard",
+        "unit_flashcard_unreviewed",
+    ):
+        if item_type == "unit_flashcard_unreviewed":
+            st.subheader("Unreviewed unit flashcard")
+        elif item_type == "unit_flashcard":
+            st.subheader("Unit flashcard")
+        elif item_type == "flashcard_unreviewed":
             st.subheader("Unreviewed flashcard")
         else:
             st.subheader("Flashcard review")
@@ -2634,7 +4167,7 @@ def page_study_session(course_name: str | None) -> None:
 
 
 def page_settings() -> None:
-    st.header("Settings")
+    _render_page_intro("settings")
     root = Path(st.session_state.project_root)
     try:
         config = load_config(root)
@@ -2643,9 +4176,162 @@ def page_settings() -> None:
         _show_exception(exc)
         return
 
+    settings_path = get_app_settings_path(root)
     st.write(f"**Project root:** `{root}`")
     st.write(f"**Courses directory:** `{courses_dir}`")
-    st.write(f"**Default LM Studio URL:** `{DEFAULT_BASE_URL}`")
+    st.write(f"**App settings file:** `{settings_path}`")
+    st.warning(
+        "Local app settings are gitignored and should **not** contain API keys or secrets. "
+        "Use `.env` or **Google AI** below for API keys."
+    )
+
+    current = load_app_settings(root)
+    lm = current.get("lm_studio", {})
+    chunking = current.get("chunking", {})
+    digest = current.get("digest", {})
+    gui = current.get("gui", {})
+
+    st.subheader("LM Studio")
+    set_lm_url = st.text_input(
+        "Base URL",
+        value=lm.get("base_url", DEFAULT_BASE_URL),
+        key="settings_lm_url",
+    )
+    set_lm_model = st.text_input(
+        "Default model (empty = first from /models)",
+        value=lm.get("default_model", ""),
+        key="settings_lm_model",
+    )
+    col_lm1, col_lm2, col_lm3 = st.columns(3)
+    with col_lm1:
+        set_temperature = st.number_input(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=float(lm.get("temperature", 0.2)),
+            step=0.1,
+            key="settings_lm_temperature",
+        )
+    with col_lm2:
+        set_max_tokens = st.number_input(
+            "Max tokens",
+            min_value=1000,
+            max_value=32000,
+            value=int(lm.get("max_tokens", DEFAULT_DIGEST_MAX_TOKENS)),
+            step=500,
+            key="settings_lm_max_tokens",
+        )
+    with col_lm3:
+        set_timeout = st.number_input(
+            "Timeout (seconds)",
+            min_value=30,
+            max_value=3600,
+            value=int(lm.get("timeout", 300)),
+            step=30,
+            key="settings_lm_timeout",
+        )
+
+    st.subheader("Chunking")
+    col_ch1, col_ch2 = st.columns(2)
+    with col_ch1:
+        set_max_words = st.number_input(
+            "Max words",
+            min_value=100,
+            value=int(chunking.get("max_words", 1200)),
+            key="settings_max_words",
+        )
+    with col_ch2:
+        set_overlap_words = st.number_input(
+            "Overlap words",
+            min_value=0,
+            value=int(chunking.get("overlap_words", 150)),
+            key="settings_overlap_words",
+        )
+
+    st.subheader("Digest defaults")
+    set_limit_chunks = st.number_input(
+        "Default first-chunk limit",
+        min_value=1,
+        max_value=50,
+        value=int(digest.get("limit_chunks_default", 1)),
+        key="settings_limit_chunks",
+        help="Used as the default chunk limit preference (Pipeline uses 1 for test digest).",
+    )
+    set_full_digest = st.checkbox(
+        "Full digest default (Guided Workflow)",
+        value=bool(digest.get("full_digest_default", False)),
+        key="settings_full_digest",
+    )
+    set_overwrite = st.checkbox(
+        "Overwrite default",
+        value=bool(digest.get("overwrite_default", False)),
+        key="settings_overwrite",
+    )
+
+    st.subheader("GUI")
+    page_options = flatten_navigation_pages()
+    page_keys = navigation_keys()
+    default_page = str(gui.get("default_page", "today")).strip().lower()
+    if default_page not in page_keys:
+        default_page = "today"
+    set_default_page_label = st.selectbox(
+        "Default page on startup",
+        page_options,
+        index=page_keys.index(default_page),
+        key="settings_default_page",
+    )
+    set_show_advanced = st.checkbox(
+        "Show advanced options in Guided Workflow",
+        value=bool(gui.get("show_advanced_options", True)),
+        key="settings_show_advanced",
+    )
+
+    save_col, reset_col = st.columns(2)
+    with save_col:
+        save_clicked = st.button("Save settings", key="settings_save")
+    with reset_col:
+        reset_clicked = st.button("Reset to defaults", key="settings_reset")
+
+    if reset_clicked:
+        defaults = get_default_app_settings()
+        save_app_settings(defaults, root)
+        _apply_app_settings_to_session(defaults)
+        st.success("Settings reset to defaults.")
+        st.rerun()
+
+    if save_clicked:
+        new_settings = {
+            "lm_studio": {
+                "base_url": set_lm_url.strip(),
+                "default_model": set_lm_model.strip(),
+                "temperature": float(set_temperature),
+                "max_tokens": int(set_max_tokens),
+                "timeout": int(set_timeout),
+            },
+            "chunking": {
+                "max_words": int(set_max_words),
+                "overlap_words": int(set_overlap_words),
+            },
+            "digest": {
+                "limit_chunks_default": int(set_limit_chunks),
+                "full_digest_default": bool(set_full_digest),
+                "overwrite_default": bool(set_overwrite),
+            },
+            "gui": {
+                "default_page": option_to_page_key(set_default_page_label) or "today",
+                "show_advanced_options": bool(set_show_advanced),
+            },
+        }
+        errors = validate_app_settings(new_settings)
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            path = save_app_settings(new_settings, root)
+            _apply_app_settings_to_session(new_settings)
+            st.success(f"Saved settings to `{path}`.")
+            st.rerun()
+
     st.subheader("Google AI (intermediate audit)")
     has_key = bool(get_google_api_key(root))
     st.write(
@@ -2654,7 +4340,8 @@ def page_settings() -> None:
     )
     st.caption(
         "Preferred: gitignored `.env` with `GOOGLE_API_KEY=...` (see `.env.example`). "
-        "Also: Windows user env var, `config/local_secrets.json`, or Save below."
+        "Also: Windows user env var, `config/local_secrets.json`, or Save below. "
+        "API keys are **not** stored in app settings."
     )
     new_key = st.text_input(
         "Google AI API key",
@@ -2669,8 +4356,8 @@ def page_settings() -> None:
             path = set_google_api_key(new_key.strip(), root)
             st.success(f"Saved to `{path}` (gitignored). Restart not required.")
     st.info(
-        "LM Studio URL is on the Pipeline page. "
-        "General config: `config/studyforge_config.json`."
+        "Project layout and courses directory: `config/studyforge_config.json`. "
+        "Pipeline controls use saved LM Studio and chunking defaults from above."
     )
 
 
@@ -2678,33 +4365,39 @@ def run() -> None:
     """Entry point for Streamlit."""
     st.set_page_config(page_title="StudyForge", page_icon="📚", layout="wide")
     _init_session_state()
-    page, course_name = _render_sidebar()
+    page_key, course_name = _render_sidebar()
 
-    if page == "Today":
+    if page_key == "today":
         page_today(course_name)
-    elif page == "Dashboard":
+    elif page_key == "dashboard":
         page_dashboard(course_name)
-    elif page == "Course Quality":
+    elif page_key == "course_quality":
         page_course_quality(course_name)
-    elif page == "Evidence Trace":
+    elif page_key == "evidence_trace":
         page_evidence_trace(course_name)
-    elif page == "Courses":
+    elif page_key == "courses":
         page_courses()
-    elif page == "Sources":
+    elif page_key == "sources":
         page_sources(course_name)
-    elif page == "Pipeline":
+    elif page_key == "pipeline":
         page_pipeline(course_name)
-    elif page == "Audits":
+    elif page_key == "audits":
         page_audits(course_name)
-    elif page == "Active Recall":
+    elif page_key == "study_units":
+        page_study_units(course_name)
+    elif page_key == "active_recall":
         page_active_recall(course_name)
-    elif page == "Flashcards":
+    elif page_key == "flashcards":
         page_flashcards(course_name)
-    elif page == "Review Tracker":
+    elif page_key == "mock_tests":
+        page_mock_tests(course_name)
+    elif page_key == "exam_prep":
+        page_exam_prep(course_name)
+    elif page_key == "review_tracker":
         page_review_tracker(course_name)
-    elif page == "Study Session":
+    elif page_key == "study_session":
         page_study_session(course_name)
-    elif page == "Settings":
+    elif page_key == "settings":
         page_settings()
 
 

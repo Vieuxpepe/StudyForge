@@ -24,6 +24,7 @@ from studyforge.study.flashcard_review import (
 from studyforge.study.mistakes import get_mistakes_log_path, load_mistakes_log
 from studyforge.study.review_planner import collect_active_recall_needs_review
 from studyforge.study.review_schedule import today_date_str
+from studyforge.study.study_units import list_study_units
 from studyforge.study.weak_points import get_weak_points_path, load_weak_points
 
 APP_DATA_DIR = Path("08_App_Data")
@@ -531,10 +532,58 @@ def get_course_quality_report(
         else 999,
     )
 
+    from studyforge.study.exam_prep import get_nearest_active_exam_target
+    from studyforge.study.exam_targets import list_active_exam_targets
+
+    study_units = list_study_units(course_name, root)
+    study_units_count = len(study_units)
+    units_with_synthesis_count = sum(
+        1
+        for unit in study_units
+        if str(unit.get("latest_synthesis_id", "")).strip()
+    )
+    units_with_unit_pack_count = sum(
+        1
+        for unit in study_units
+        if str(unit.get("latest_unit_study_pack_manifest_path", "")).strip()
+    )
+    if evaluated and study_units_count == 0:
+        top_warnings.append(
+            "No study units defined. Group related sources into study units "
+            "for easier planning."
+        )
+
+    active_exam_targets = list_active_exam_targets(course_name, root)
+    nearest_exam = get_nearest_active_exam_target(course_name, root)
+    nearest_exam_payload = None
+    if nearest_exam:
+        nearest_exam_payload = {
+            "exam_id": nearest_exam.get("exam_id"),
+            "title": nearest_exam.get("title"),
+            "exam_date": nearest_exam.get("exam_date"),
+            "days_until_exam": nearest_exam.get("days_until_exam"),
+        }
+        try:
+            from studyforge.study.exam_readiness import get_exam_readiness_report
+
+            readiness_report = get_exam_readiness_report(
+                course_name, str(nearest_exam.get("exam_id", "")), root
+            )
+            readiness = readiness_report.get("readiness", {})
+            nearest_exam_payload["readiness_score"] = readiness.get("score")
+            nearest_exam_payload["readiness_status"] = readiness.get("status")
+        except Exception:
+            pass
+
     return {
         "course": course_path.name,
         "date": _today(),
         "source_count": len(evaluated),
+        "study_units_count": study_units_count,
+        "units_with_synthesis_count": units_with_synthesis_count,
+        "units_with_unit_pack_count": units_with_unit_pack_count,
+        "active_exam_targets_count": len(active_exam_targets),
+        "nearest_exam": nearest_exam_payload,
         "ready_count": ready_count,
         "needs_review_count": needs_review_count,
         "failed_count": failed_count,
@@ -554,15 +603,35 @@ def build_course_quality_markdown(report: dict) -> str:
         "## Summary",
         "",
         f"- Sources: {report.get('source_count', 0)}",
+        f"- Study units: {report.get('study_units_count', 0)}",
+        f"- Units with imported synthesis: {report.get('units_with_synthesis_count', 0)}",
+        f"- Units with unit study pack: {report.get('units_with_unit_pack_count', 0)}",
+        f"- Active exam targets: {report.get('active_exam_targets_count', 0)}",
         f"- Ready: {report.get('ready_count', 0)}",
         f"- Needs review: {report.get('needs_review_count', 0)}",
         f"- Failed: {report.get('failed_count', 0)}",
-        "",
-        "## Source Health Table",
-        "",
-        "| Source | Title | Status | Extraction | Digest | Int. Audit | Final Audit | Study Pack | Activity | Next Action |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+    nearest_exam = report.get("nearest_exam")
+    if nearest_exam:
+        lines.append(
+            f"- Nearest exam: {nearest_exam.get('title', '')} "
+            f"({nearest_exam.get('exam_date', '')}) — "
+            f"{nearest_exam.get('days_until_exam', '')} day(s) away"
+        )
+        if nearest_exam.get("readiness_score") is not None:
+            lines.append(
+                f"- Nearest exam readiness: {nearest_exam.get('readiness_score')}% "
+                f"({nearest_exam.get('readiness_status', '')})"
+            )
+    lines.extend(
+        [
+            "",
+            "## Source Health Table",
+            "",
+            "| Source | Title | Status | Extraction | Digest | Int. Audit | Final Audit | Study Pack | Activity | Next Action |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
 
     for source in report.get("sources") or []:
         scores = source.get("scores") or {}

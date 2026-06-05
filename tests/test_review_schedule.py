@@ -25,6 +25,7 @@ from studyforge.study.flashcards import flashcards_to_csv  # noqa: E402
 from studyforge.study.review_planner import generate_review_plan  # noqa: E402
 from studyforge.study.review_schedule import (  # noqa: E402
     add_days,
+    build_review_date_reviewed,
     is_due,
     latest_review_by_card,
     next_due_date_for_flashcard_grade,
@@ -66,27 +67,41 @@ class TestReviewSchedule(unittest.TestCase):
         latest = latest_review_by_card(reviews)
         self.assertEqual(latest["FC-SRC-0001-0001"]["grade"], "easy")
 
+    def test_build_review_date_reviewed_explicit_day(self) -> None:
+        date_reviewed, reviewed_day = build_review_date_reviewed(
+            "2026-06-04",
+            "2026-06-05T00:00:00",
+        )
+        self.assertEqual(reviewed_day, "2026-06-04")
+        self.assertEqual(date_reviewed, "2026-06-04T12:00:00")
+
+    def test_build_review_date_reviewed_defaults_to_now(self) -> None:
+        date_reviewed, reviewed_day = build_review_date_reviewed(
+            None,
+            "2026-06-05T08:30:00-04:00",
+        )
+        self.assertEqual(date_reviewed, "2026-06-05T08:30:00-04:00")
+        self.assertEqual(reviewed_day, "2026-06-05")
+
     def test_record_review_adds_due_date(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             course = self._setup_course(root)
-            with patch(
-                "studyforge.study.flashcard_review.today_date_str",
-                return_value="2026-06-04",
-            ):
-                result = record_flashcard_review(
-                    "ECA1010_Test",
-                    "SRC-0001",
-                    "FC-SRC-0001-0001",
-                    "Q",
-                    "A",
-                    "hard",
-                    root=root,
-                )
+            result = record_flashcard_review(
+                "ECA1010_Test",
+                "SRC-0001",
+                "FC-SRC-0001-0001",
+                "Q",
+                "A",
+                "hard",
+                reviewed_date="2026-06-04",
+                root=root,
+            )
             self.assertEqual(result["due_date"], "2026-06-06")
             log_path = get_flashcard_review_log_path(course, "SRC-0001")
             data = json.loads(log_path.read_text(encoding="utf-8"))
             self.assertEqual(data["reviews"][0]["due_date"], "2026-06-06")
+            self.assertEqual(data["reviews"][0]["date_reviewed"], "2026-06-04T12:00:00")
 
     def test_summarize_includes_due_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

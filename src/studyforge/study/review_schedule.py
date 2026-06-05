@@ -37,6 +37,26 @@ def _reviewed_date_str(reviewed_date: str | None) -> str:
     return today_date_str()
 
 
+def build_review_date_reviewed(
+    reviewed_date: str | None,
+    default_iso: str,
+) -> tuple[str, str]:
+    """
+    Return ``(date_reviewed, reviewed_day)`` for a flashcard review log entry.
+
+    When ``reviewed_date`` is a date (YYYY-MM-DD) or ISO datetime, that value is
+    used for scheduling. Otherwise ``default_iso`` (typically "now") is used.
+    """
+    if reviewed_date is not None and str(reviewed_date).strip():
+        value = str(reviewed_date).strip()
+        if "T" in value:
+            return value, value[:10]
+        day = _reviewed_date_str(value)
+        return f"{day}T12:00:00", day
+    reviewed_day = default_iso[:10] if len(default_iso) >= 10 else _reviewed_date_str(None)
+    return default_iso, reviewed_day
+
+
 def next_due_date_for_flashcard_grade(
     grade: str, reviewed_date: str | None = None
 ) -> str:

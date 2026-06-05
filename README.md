@@ -41,16 +41,37 @@ Or:
 python scripts/launch_gui.py
 ```
 
+The sidebar **Go to** menu groups pages into six sections:
+
+| Section | Pages |
+|---------|--------|
+| **Today** | Today — what to review right now |
+| **Build Study Material** | Dashboard, Sources, Pipeline, Audits, Study Units |
+| **Study / Review** | Study Session, Active Recall, Flashcards, Mock Tests, Exam Prep, Review Tracker |
+| **Quality / Trust** | Course Quality, Evidence Trace |
+| **Course Tools** | Courses (create course, backup, verify, restore) |
+| **Settings** | Local app preferences and Google API key |
+
+Each page opens with a short caption describing its role. **Today** includes a **Where should I go?** helper for common tasks.
+
 1. **Today** — dashboard of what to study now: due flashcards, active recall gaps, open mistakes/weak points, review plan status, and recommended next action (deterministic; no calendar integration).
-2. **Courses** — create or select a course.
+2. **Dashboard** — source pipeline overview for the selected course.
 3. **Sources** — upload a PDF.
 4. **Pipeline** — **Guided Workflow** runs one Pipeline Doctor step per click; **Pipeline Doctor** shows progress; manual controls remain below; after a final audit, use **Study Pack**.
 5. **Audits** — export/import intermediate and final audits; **Final Audit Normalizer** maps messy headings to the study-pack template (or export a manual repair packet).
-6. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
-7. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
-8. **Study Session** — guided session through today's priorities (recall gaps, mistakes, weak points, flashcards) plus unanswered active recall questions from study packs; self-graded only.
+6. **Study Units** — group multiple sources into a named topic/chapter/exam target; **Unit Dashboard** aggregates readiness, review items, and output paths per unit; unit review plans include unit-level active recall and flashcards plus source-filtered items; **Unit Synthesis Packet** exports multi-source material for manual paste into ChatGPT/Gemini; **Unit Synthesis Import** stores versioned unified guides; **Unit Study Pack** generates unit-level guides, flashcards, quiz, and active recall from the latest synthesis (deterministic parser only).
+7. **Study Session** — guided session through today's priorities (recall gaps, mistakes, weak points, flashcards) plus unanswered active recall questions from study packs; course-wide, focused on one **Study Unit**, or focused on an **Exam target** (units, direct sources, and sources inside included units — deterministic filtering, no AI); self-graded only.
+8. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
 9. **Flashcards** — review exported flashcards in-app, self-grade (easy/good/hard/forgot/skipped), and log results with lightweight due scheduling (+1 to +7 days by grade); due cards appear in review plans and study sessions; optional weak point creation; not full Anki/SM-2.
-10. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
+10. **Mock Tests** — generate deterministic practice tests from source or unit study packs (practice quiz, active recall, flashcards); grade question-by-question with partial credit, finalize into a normal mock attempt, export a post-mock review report, or use quick total-score entry; missed questions can create mistakes/weak points; no AI grading.
+11. **Exam Prep** — define exam targets (date, units, sources, target score), view a deterministic **exam readiness score** (material readiness, review load, mock test performance, time pressure — guidance only, not a grade guarantee), and generate prep plans from readiness, review items, and mock test history; no calendar integration or AI planning.
+12. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
+13. **Course Quality** — trust/readiness report across sources.
+14. **Evidence Trace** — inspect chunks, digests, and audits side by side.
+15. **Courses** — create or select a course; backup, verify, and safe restore.
+16. **Settings** — save local app preferences (LM Studio URL/model, chunking, digest, GUI defaults) to gitignored `config/local_app_settings.json`; **do not** store API keys there. Google API key for automated intermediate audit stays in `.env` or `config/local_secrets.json`.
+
+Saved LM Studio LAN URL and model are applied as Pipeline defaults on startup. CLI scripts keep their own built-in defaults unless you pass flags.
 
 The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
 
@@ -133,11 +154,69 @@ python scripts/review_plan.py --course ECA1010_Microeconomics --limit 5 --overwr
 python scripts/review_plan.py --course ECA1010_Microeconomics --date 2026-06-04
 
 python scripts/study_session.py --course ECA1010_Microeconomics --start --limit 10
+python scripts/study_session.py --course ECA1010_Microeconomics --start --unit-id UNIT-0001 --limit 10
 python scripts/study_session.py --course ECA1010_Microeconomics --latest
 python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --complete-item SESSION-ITEM-0001 --result partial --notes "Still confused"
 python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --finish
 python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --export
 ```
+
+Unit synthesis packet (manual export for ChatGPT/Gemini; no API call):
+
+```bash
+python scripts/unit_synthesis_packet.py --course ECA1010_Microeconomics --unit-id UNIT-0001
+python scripts/unit_synthesis_packet.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --overwrite
+python scripts/unit_synthesis_packet.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --no-learning-state
+```
+
+Import unit synthesis after manual AI synthesis (versioned; never overwrites older versions):
+
+```bash
+python scripts/import_unit_synthesis.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --file "C:\path\to\unit_synthesis.md"
+python scripts/import_unit_synthesis.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --text "# Unit Synthesis\n..." --synthesizer-name ChatGPT --notes "First import"
+```
+
+Unit study pack (from latest imported synthesis; no AI):
+
+```bash
+python scripts/generate_unit_study_pack.py --course ECA1010_Microeconomics --unit-id UNIT-0001
+python scripts/generate_unit_study_pack.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --diagnose-only
+python scripts/generate_unit_study_pack.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --overwrite
+```
+
+Unit-level review (separate logs from source-level; simple due dates for unit flashcards, not full spaced repetition):
+
+```bash
+python scripts/unit_review.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --list-recall
+python scripts/unit_review.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --record-recall --question-id UAR-UNIT-0001-Q001 --answer "..." --grade partial
+python scripts/unit_review.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --list-flashcards
+python scripts/unit_review.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --record-flashcard --card-id UFC-UNIT-0001-0001 --grade hard
+python scripts/unit_review.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --summary
+```
+
+Unit study packs feed unit-focused study sessions, unit review plans, and Today Dashboard unit counts. Logs: `07_My_Work/unit_active_recall_logs/`, `07_My_Work/unit_flashcard_logs/`.
+
+Mock tests (deterministic; self-grade only):
+
+```bash
+python scripts/mock_test.py --course ECA1010_Microeconomics --source-id SRC-0001 --generate
+python scripts/mock_test.py --course ECA1010_Microeconomics --unit-id UNIT-0001 --generate --questions 15
+python scripts/mock_test.py --course ECA1010_Microeconomics --record --mock-test-id MT-SRC-0001-2026-06-04-120000 --scope source --source-id SRC-0001 --score 14 --total 20 --notes "Missed formulas" --weak-topic "CPI formula"
+python scripts/mock_test.py --course ECA1010_Microeconomics --summary
+```
+
+Outputs: `07_My_Work/mock_tests/`; attempt log: `mock_test_attempts.json`.
+
+Exam targets and prep plans (deterministic; no calendar sync):
+
+```bash
+python scripts/exam_targets.py --course ECA1010_Microeconomics --list
+python scripts/exam_targets.py --course ECA1010_Microeconomics --create --title "Quiz 2" --date 2026-06-20 --target-score 80 --units UNIT-0001 UNIT-0002 --sources SRC-0005
+python scripts/exam_targets.py --course ECA1010_Microeconomics --summary EXAM-0001
+python scripts/exam_prep.py --course ECA1010_Microeconomics --exam-id EXAM-0001 --export --overwrite
+```
+
+Data: `00_Master/exam_targets.json`; plans: `07_My_Work/exam_prep/`.
 
 Guided Workflow (one step per click; uses Pipeline Doctor `next_action`):
 

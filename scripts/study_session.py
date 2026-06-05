@@ -4,6 +4,8 @@ Study Session Mode v1 — guided review through priorities and unanswered recall
 
 Examples:
     python scripts/study_session.py --course ECA1010_Microeconomics --start --limit 10
+    python scripts/study_session.py --course ECA1010_Microeconomics --start --unit-id UNIT-0001 --limit 10
+    python scripts/study_session.py --course ECA1010_Microeconomics --start --exam-id EXAM-0001 --limit 20
     python scripts/study_session.py --course ECA1010_Microeconomics --latest
     python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --complete-item SESSION-ITEM-0001 --result partial --notes "Still confused"
     python scripts/study_session.py --course ECA1010_Microeconomics --session-id SESSION-20260604-120000 --finish
@@ -21,7 +23,9 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from studyforge.core.sources import CourseNotFoundError  # noqa: E402
+from studyforge.study.exam_targets import ExamTargetNotFoundError  # noqa: E402
 from studyforge.study.study_session import (  # noqa: E402
+    ConflictingSessionScopeError,
     InvalidSessionResultError,
     StudySessionItemNotFoundError,
     StudySessionNotFoundError,
@@ -31,6 +35,7 @@ from studyforge.study.study_session import (  # noqa: E402
     record_session_item_result,
     start_study_session,
 )
+from studyforge.study.study_units import StudyUnitNotFoundError  # noqa: E402
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -40,6 +45,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--course", required=True)
     parser.add_argument("--start", action="store_true", help="Start a new session.")
     parser.add_argument("--limit", type=int, default=10, help="Max items (with --start).")
+    parser.add_argument(
+        "--unit-id",
+        help="Start a unit-focused session (sources in this study unit only).",
+    )
+    parser.add_argument(
+        "--exam-id",
+        help="Start an exam-focused session (units and sources in the exam target).",
+    )
     parser.add_argument("--latest", action="store_true", help="Show latest session JSON.")
     parser.add_argument("--session-id", help="Session id for item/finish/export.")
     parser.add_argument("--complete-item", help="Session item id to mark done.")
@@ -84,10 +97,37 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.start:
-            summary = start_study_session(args.course, limit=args.limit)
+            if args.unit_id and args.exam_id:
+                print(
+                    "Error: Provide either --unit-id or --exam-id, not both.",
+                    file=sys.stderr,
+                )
+                return 1
+            summary = start_study_session(
+                args.course,
+                limit=args.limit,
+                unit_id=args.unit_id,
+                exam_id=args.exam_id,
+            )
             print("Study session started.\n")
+            print(f"Scope:\n{summary.get('scope', 'course')}\n")
+            if summary.get("scope") == "unit":
+                print(
+                    f"Unit:\n{summary.get('unit_id', '')} — "
+                    f"{summary.get('unit_title', '')}\n"
+                )
+            elif summary.get("scope") == "exam":
+                print(
+                    f"Exam:\n{summary.get('exam_id', '')} — "
+                    f"{summary.get('exam_title', '')}\n"
+                )
+                print(f"Date:\n{summary.get('exam_date', '')}\n")
+                if summary.get("target_score") is not None:
+                    print(f"Target:\n{summary.get('target_score')}%\n")
             print(f"Session: {summary['session_id']}\n")
             print(f"Items: {summary['item_count']}\n")
+            if summary.get("warning"):
+                print(f"Warning: {summary['warning']}\n")
             print(f"Log: {summary['log_path']}\n")
             return 0
 
@@ -150,6 +190,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except (StudySessionNotFoundError, StudySessionItemNotFoundError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except StudyUnitNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ExamTargetNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ConflictingSessionScopeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except InvalidSessionResultError as exc:

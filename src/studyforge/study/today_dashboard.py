@@ -19,6 +19,19 @@ from studyforge.study.review_planner import (
 )
 from studyforge.study.review_schedule import today_date_str
 from studyforge.study.study_session import get_latest_study_session
+from studyforge.study.study_units import count_active_study_units, list_study_units
+from studyforge.study.exam_prep import get_exam_prep_dashboard_hint, get_nearest_active_exam_target
+from studyforge.study.exam_readiness import (
+    get_exam_readiness_dashboard_hint,
+    get_exam_readiness_report,
+)
+from studyforge.study.exam_targets import list_active_exam_targets
+from studyforge.study.mock_test_grading import get_ungraded_mock_test_hint
+from studyforge.study.mock_tests import (
+    get_mock_test_exam_prep_hint,
+    summarize_mock_test_attempts,
+)
+from studyforge.study.unit_review import get_unit_review_counts
 
 MY_WORK_DIR = Path("07_My_Work")
 TODAY_DASHBOARD_SUBDIR = "today_dashboard"
@@ -64,8 +77,17 @@ def _build_recommended_actions(
     reviewable: bool,
     has_review_plan_today: bool,
     latest_session_status: str,
+    active_study_units: int = 0,
 ) -> list[dict]:
     if not reviewable:
+        if active_study_units > 0:
+            return [
+                {
+                    "key": "review_active_units",
+                    "label": "Review active study units",
+                    "reason": "You have active study units to work through.",
+                }
+            ]
         return [
             {
                 "key": "nothing_due",
@@ -142,11 +164,71 @@ def get_today_dashboard(
         limit=10,
     )
 
+    active_study_units = count_active_study_units(course_name, root)
+    active_units = []
+    for unit in list_study_units(course_name, root):
+        if str(unit.get("status", "")).lower() != "active":
+            continue
+        unit_id = str(unit.get("unit_id", ""))
+        entry = {
+            "unit_id": unit_id,
+            "title": unit.get("title", ""),
+            "has_synthesis": bool(str(unit.get("latest_synthesis_id", "")).strip()),
+            "has_unit_pack": bool(
+                str(unit.get("latest_unit_study_pack_manifest_path", "")).strip()
+            ),
+        }
+        if entry["has_unit_pack"] and unit_id:
+            counts = get_unit_review_counts(course_name, unit_id, root)
+            entry["unit_due_flashcards"] = counts.get("unit_due_flashcards", 0)
+            entry["unit_recall_gaps"] = counts.get("unit_recall_gaps", 0)
+        active_units.append(entry)
+
     recommended_actions = _build_recommended_actions(
         reviewable=reviewable,
         has_review_plan_today=has_review_plan_today,
         latest_session_status=session_status,
+        active_study_units=active_study_units,
     )
+    mock_test_summary = summarize_mock_test_attempts(course_name, root)
+    latest_mock_attempt = mock_test_summary.get("latest_attempt")
+    exam_prep_hint = get_mock_test_exam_prep_hint(course_name, root)
+    if exam_prep_hint:
+        recommended_actions.append(exam_prep_hint)
+    exam_dashboard_hint = get_exam_prep_dashboard_hint(course_name, root, day)
+    if exam_dashboard_hint and session_status != "in_progress":
+        recommended_actions.append(exam_dashboard_hint)
+    readiness_hint = get_exam_readiness_dashboard_hint(
+        course_name,
+        root,
+        session_in_progress=session_status == "in_progress",
+    )
+    if readiness_hint:
+        recommended_actions.append(readiness_hint)
+    if session_status != "in_progress":
+        ungraded_hint = get_ungraded_mock_test_hint(course_name, root)
+        if ungraded_hint:
+            recommended_actions.append(ungraded_hint)
+
+    active_exam_targets = list_active_exam_targets(course_name, root)
+    nearest_exam = get_nearest_active_exam_target(course_name, root, day)
+    nearest_exam_payload = None
+    if nearest_exam:
+        nearest_exam_payload = {
+            "exam_id": nearest_exam.get("exam_id"),
+            "title": nearest_exam.get("title"),
+            "exam_date": nearest_exam.get("exam_date"),
+            "days_until_exam": nearest_exam.get("days_until_exam"),
+        }
+        try:
+            readiness_report = get_exam_readiness_report(
+                course_name, str(nearest_exam.get("exam_id", "")), root
+            )
+            readiness = readiness_report.get("readiness", {})
+            nearest_exam_payload["readiness_score"] = readiness.get("score")
+            nearest_exam_payload["readiness_status"] = readiness.get("status")
+        except Exception:
+            pass
 
     warnings: list[str] = []
     if reviewable and not has_review_plan_today and session_status != "in_progress":
@@ -169,6 +251,8 @@ def get_today_dashboard(
             "active_recall_needs_review": len(recall_items),
             "open_mistakes": len(mistakes),
             "open_weak_points": len(weak_points),
+            "active_study_units": active_study_units,
+            "active_units": active_units,
             "has_review_plan_today": has_review_plan_today,
             "latest_session_status": session_status,
             "latest_session_id": (
@@ -182,7 +266,23 @@ def get_today_dashboard(
                 if has_review_plan_today
                 else None
             ),
+            "mock_test_attempt_count": mock_test_summary.get("attempt_count", 0),
+            "mock_test_average_percent": mock_test_summary.get("average_percent", 0.0),
+            "latest_mock_test_score": (
+                {
+                    "mock_test_id": latest_mock_attempt.get("mock_test_id"),
+                    "score_correct": latest_mock_attempt.get("score_correct"),
+                    "score_total": latest_mock_attempt.get("score_total"),
+                    "percent": latest_mock_attempt.get("percent"),
+                    "date_recorded": latest_mock_attempt.get("date_recorded"),
+                }
+                if latest_mock_attempt
+                else None
+            ),
+            "active_exam_targets": len(active_exam_targets),
+            "nearest_exam": nearest_exam_payload,
         },
+        "active_units": active_units,
         "priority_items": priority_items,
         "recommended_actions": recommended_actions,
         "warnings": warnings,
@@ -212,12 +312,60 @@ def build_today_dashboard_markdown(dashboard: dict) -> str:
         f"- Active recall needing review: {summary.get('active_recall_needs_review', 0)}",
         f"- Open mistakes: {summary.get('open_mistakes', 0)}",
         f"- Open weak points: {summary.get('open_weak_points', 0)}",
-        f"- Review plan today: {'yes' if summary.get('has_review_plan_today') else 'no'}",
-        f"- Latest session: {session_line}",
-        "",
-        "## Priority Items",
-        "",
+        f"- Active study units: {summary.get('active_study_units', 0)}",
+        f"- Active exam targets: {summary.get('active_exam_targets', 0)}",
     ]
+    nearest_exam = summary.get("nearest_exam")
+    if nearest_exam:
+        lines.append(
+            f"- Nearest exam: {nearest_exam.get('title', '')} "
+            f"({nearest_exam.get('exam_date', '')}) — "
+            f"{nearest_exam.get('days_until_exam', '')} day(s) away"
+        )
+        if nearest_exam.get("readiness_score") is not None:
+            lines.append(
+                f"- Nearest exam readiness: {nearest_exam.get('readiness_score')}% "
+                f"— {nearest_exam.get('readiness_status', '')}"
+            )
+    latest_mock = summary.get("latest_mock_test_score")
+    if latest_mock:
+        lines.append(
+            f"- Latest mock test: {latest_mock.get('score_correct')}/"
+            f"{latest_mock.get('score_total')} "
+            f"({latest_mock.get('percent')}%) — `{latest_mock.get('mock_test_id', '')}`"
+        )
+    elif summary.get("mock_test_attempt_count", 0) == 0:
+        lines.append("- Latest mock test: none yet")
+    active_units = dashboard.get("active_units") or summary.get("active_units") or []
+    if active_units:
+        lines.append("- Active unit list:")
+        for unit in active_units:
+            markers = ""
+            if unit.get("has_synthesis"):
+                markers += " [synthesis]"
+            if unit.get("has_unit_pack"):
+                markers += " [unit pack]"
+            extra = ""
+            if unit.get("has_unit_pack"):
+                due_fc = unit.get("unit_due_flashcards")
+                recall_gaps = unit.get("unit_recall_gaps")
+                if due_fc is not None or recall_gaps is not None:
+                    extra = (
+                        f" — unit due flashcards: {due_fc or 0}, "
+                        f"unit recall gaps: {recall_gaps or 0}"
+                    )
+            lines.append(
+                f"  - {unit.get('unit_id', '')}: {unit.get('title', '')}{markers}{extra}"
+            )
+    lines.extend(
+        [
+            f"- Review plan today: {'yes' if summary.get('has_review_plan_today') else 'no'}",
+            f"- Latest session: {session_line}",
+            "",
+            "## Priority Items",
+            "",
+        ]
+    )
 
     priority_items = dashboard.get("priority_items") or []
     if priority_items:

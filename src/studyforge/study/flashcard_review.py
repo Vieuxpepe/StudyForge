@@ -13,6 +13,7 @@ from studyforge.core.extraction_jobs import find_source_by_id
 from studyforge.core.sources import load_source_registry, resolve_course_path
 from studyforge.study.flashcards import get_flashcard_output_paths
 from studyforge.study.review_schedule import (
+    build_review_date_reviewed,
     is_due,
     latest_review_by_card,
     next_due_date_for_flashcard_grade,
@@ -237,6 +238,7 @@ def record_flashcard_review(
     notes: str | None = None,
     create_weak_point: bool = False,
     weak_point_concept: str | None = None,
+    reviewed_date: str | None = None,
     root: Path | None = None,
 ) -> dict:
     """Append one self-graded flashcard review to the log."""
@@ -247,8 +249,9 @@ def record_flashcard_review(
     log = load_flashcard_review_log(log_path, normalized_id)
 
     review_number = len(log.get("reviews", [])) + 1
-    date_reviewed = _now_iso()
-    reviewed_day = _reviewed_date_from_iso(date_reviewed)
+    date_reviewed, reviewed_day = build_review_date_reviewed(
+        reviewed_date, _now_iso()
+    )
     due_date = next_due_date_for_flashcard_grade(grade_normalized, reviewed_day)
     review = {
         "review_id": _make_review_id(review_number),

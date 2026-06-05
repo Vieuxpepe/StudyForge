@@ -216,6 +216,8 @@ def run_guided_next_step(
             base_url=str(opts["base_url"]),
             model=opts.get("model"),
             max_tokens=int(opts["max_tokens"]),
+            temperature=float(opts.get("temperature", 0.2)),
+            timeout=int(opts.get("timeout", 300)),
             limit_chunks=limit,
             overwrite=bool(opts["overwrite"]),
             root=root,
