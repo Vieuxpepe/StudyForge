@@ -49,7 +49,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exclude flashcard fronts from generated tests.",
     )
-    parser.add_argument("--overwrite", action="store_true", help="Reserved for future use.")
     parser.add_argument("--mock-test-id", help="Mock test ID for --record.")
     parser.add_argument("--scope", choices=["source", "unit"], help="Scope for --record.")
     parser.add_argument("--score", type=int, help="Correct answers for --record.")
@@ -109,7 +108,6 @@ def main(argv: list[str] | None = None) -> int:
                     source_id=args.source_id,
                     question_count=args.questions,
                     include_flashcards=not args.no_flashcards,
-                    overwrite=args.overwrite,
                 )
             elif args.unit_id:
                 result = generate_mock_test(
@@ -118,7 +116,6 @@ def main(argv: list[str] | None = None) -> int:
                     unit_id=args.unit_id,
                     question_count=args.questions,
                     include_flashcards=not args.no_flashcards,
-                    overwrite=args.overwrite,
                 )
             else:
                 parser.error("--generate requires --source-id or --unit-id")

@@ -291,6 +291,67 @@ class TestStudyUnitDashboard(unittest.TestCase):
             "export_or_import_unit_synthesis",
         )
 
+    def test_dashboard_warns_when_unit_pack_is_stale(self) -> None:
+        manifest = (
+            self.course
+            / "06_Study_Outputs"
+            / "SRC-0001_study_pack_manifest.json"
+        )
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"quality": {"quality_status": "ok"}}),
+            encoding="utf-8",
+        )
+        unit = create_study_unit(
+            "ECA1010_Test",
+            "Topic",
+            source_ids=["SRC-0001"],
+            root=self.root,
+        )
+        synthesis_body = (
+            "# Unit Synthesis\n\n## Unit Overview\n"
+            + " ".join(["detail"] * 120)
+            + "\n## Core Concepts\nC\n## Merged Formula / Method Sheet\nF\n"
+            "## Cross-Source Connections\nX\n## Conflicts or Uncertainties\nY\n"
+            "## Must-Memorize List\nM\n## Must-Understand List\nU\n"
+            "## Exam / Homework Traps\nT\n## Practice Questions\nP\n"
+            "## Active Recall Questions\nA\n## Weak Points to Review\nW\n"
+            "## Final Unit Checklist\nDone\n"
+        )
+        import_unit_synthesis(
+            "ECA1010_Test",
+            unit["unit_id"],
+            synthesis_text=synthesis_body,
+            root=self.root,
+        )
+        generate_unit_study_pack(
+            "ECA1010_Test", unit["unit_id"], root=self.root
+        )
+        import_unit_synthesis(
+            "ECA1010_Test",
+            unit["unit_id"],
+            synthesis_text=synthesis_body + "\nExtra update.\n",
+            root=self.root,
+        )
+
+        dashboard = get_study_unit_dashboard(
+            "ECA1010_Test", unit["unit_id"], root=self.root
+        )
+
+        self.assertTrue(dashboard["stale_unit_study_pack"])
+        self.assertEqual(
+            dashboard["based_on_unit_study_pack_synthesis_id"],
+            "US-UNIT-0001-V001",
+        )
+        self.assertEqual(dashboard["latest_synthesis_id"], "US-UNIT-0001-V002")
+        self.assertEqual(
+            dashboard["recommended_action"]["key"],
+            "generate_unit_study_pack",
+        )
+        self.assertTrue(
+            any("stale" in warning.lower() for warning in dashboard["warnings"])
+        )
+
     def test_export_dashboard_writes_files(self) -> None:
         unit = create_study_unit(
             "ECA1010_Test",
