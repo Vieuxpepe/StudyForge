@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Study Session Mode v1 — guided review through prioritized items (no AI).
+Study Session Mode v1 — guided review through priorities and unanswered recall (no AI).
 
 Examples:
     python scripts/study_session.py --course ECA1010_Microeconomics --start --limit 10
@@ -35,7 +35,7 @@ from studyforge.study.study_session import (  # noqa: E402
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Guided study session from review priorities (no AI)."
+        description="Guided study session from review priorities and unanswered recall (no AI)."
     )
     parser.add_argument("--course", required=True)
     parser.add_argument("--start", action="store_true", help="Start a new session.")

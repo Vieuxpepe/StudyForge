@@ -38,18 +38,20 @@ Or:
 python scripts/launch_gui.py
 ```
 
-1. **Courses** — create or select a course.
-2. **Sources** — upload a PDF.
-3. **Pipeline** — **Guided Workflow** runs one Pipeline Doctor step per click; **Pipeline Doctor** shows progress; manual controls remain below; after a final audit, use **Study Pack**.
-4. **Audits** — export/import intermediate and final audits; **Final Audit Normalizer** maps messy headings to the study-pack template (or export a manual repair packet).
-5. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
-6. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
-7. **Study Session** — guided session through today's priorities (recall, mistakes, weak points) in one page; self-graded only.
-7. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
+1. **Today** — dashboard of what to study now: due flashcards, active recall gaps, open mistakes/weak points, review plan status, and recommended next action (deterministic; no calendar integration).
+2. **Courses** — create or select a course.
+3. **Sources** — upload a PDF.
+4. **Pipeline** — **Guided Workflow** runs one Pipeline Doctor step per click; **Pipeline Doctor** shows progress; manual controls remain below; after a final audit, use **Study Pack**.
+5. **Audits** — export/import intermediate and final audits; **Final Audit Normalizer** maps messy headings to the study-pack template (or export a manual repair packet).
+6. **Active Recall** — practice questions one at a time after study pack generation; self-grade and log attempts.
+7. **Review Tracker** — mistakes log, weak points, review session planner, and promote weak recall attempts to trackers.
+8. **Study Session** — guided session through today's priorities (recall gaps, mistakes, weak points, flashcards) plus unanswered active recall questions from study packs; self-graded only.
+9. **Flashcards** — review exported flashcards in-app, self-grade (easy/good/hard/forgot/skipped), and log results with lightweight due scheduling (+1 to +7 days by grade); due cards appear in review plans and study sessions; optional weak point creation; not full Anki/SM-2.
+10. **Settings** — LM Studio is configured on Pipeline; Google API key for automated intermediate audit.
 
 The GUI wraps the same backend as the CLI scripts—you do not need to type commands for most steps.
 
-**Study Pack (GUI):** On **Pipeline**, after importing a final audit, use the **Study Pack** section (below Pipeline Doctor). After importing a final audit, generate a study pack to create the final guide, flashcards, formula sheet, quiz, active recall file, and weak-points seed.
+**Study Pack (GUI):** On **Pipeline**, after importing a final audit, use the **Study Pack** section (below Pipeline Doctor). After importing a final audit, generate a study pack to create the final guide, flashcards (Markdown, CSV, and Anki TSV), formula sheet, quiz, active recall file, and weak-points seed. Flashcards are deterministic exports from final audit sections—import the Anki TSV manually into Anki. No spaced repetition scheduling is built in yet.
 
 ## Quick CLI end-to-end workflow
 
@@ -170,6 +172,8 @@ Also ignored: `.env`, `*.env`, `config/local_secrets.json`, local DB files, and 
 
 If you previously committed a real course folder, run `git rm -r --cached courses/YourCourse` once (files stay on disk) so Git stops tracking them.
 
+**Back up real course data locally:** course folders are gitignored, so use `python scripts/backup_course.py --course YourCourse` to create a zip under `courses/YourCourse/08_App_Data/exports/backups/`. Backups may contain private PDFs, extracted text, audits, and study logs — store them safely. Restore is manual in v1 (unzip into `courses/`).
+
 ## Audit sanitizer (automated intermediate audit)
 
 `src/studyforge/audits/audit_sanitizer.py` provides `sanitize_audit_output()` / `sanitize_audit_output_with_stats()`. It strips scratchpad blocks, excessive reasoning, and other noise from **automated** Google AI intermediate audit responses before they are saved. Manual imports via `import_intermediate_audit.py` are stored as provided.
@@ -197,7 +201,7 @@ See [docs/REGRESSION_LOGIC_AUDIT.md](docs/REGRESSION_LOGIC_AUDIT.md) for status-
 
 1. Create a course with one short PDF (a few pages).
 2. Run through the [MVP manual test checklist](docs/MVP_MANUAL_TEST_CHECKLIST.md).
-3. After final audit import, generate the study pack and open `06_Study_Outputs/study_guides/` and `flashcards/`.
+3. After final audit import, generate the study pack and open `06_Study_Outputs/study_guides/` and `flashcards/` (Markdown, CSV, and `_anki.tsv` for Anki import).
 4. Confirm Pipeline Doctor shows **Study pack ready**.
 5. Run `git status` and confirm no files under your real course path are staged.
 

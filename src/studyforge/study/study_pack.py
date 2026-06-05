@@ -20,6 +20,14 @@ from studyforge.core.sources import (
     resolve_course_path,
     save_source_registry,
 )
+from studyforge.study.flashcards import (
+    build_flashcards_from_sections,
+    flashcard_quality_warnings,
+    flashcards_to_anki_tsv,
+    flashcards_to_csv,
+    flashcards_to_markdown,
+    get_flashcard_output_paths,
+)
 
 STUDY_OUTPUTS_BASE = Path("06_Study_Outputs")
 
@@ -428,104 +436,38 @@ def _bullet_lines(text: str) -> list[str]:
     return items
 
 
-def _cards_from_bullets(
-    bullets: list[str],
-    front_template: str,
-    section_label: str,
-) -> list[tuple[str, str]]:
-    cards: list[tuple[str, str]] = []
-    for bullet in bullets:
-        topic = bullet[:80] + ("…" if len(bullet) > 80 else "")
-        front = front_template.format(topic=topic, bullet=bullet)
-        cards.append((front, bullet))
-    if not cards and section_label:
-        return []
-    return cards
-
-
 def build_flashcards(course_name: str, source: dict, sections: dict) -> str:
-    """Build simple Markdown flashcards from memorization-related sections."""
-    source_id = source.get("id", "")
-    title = source.get("title", source_id)
-    cards: list[tuple[str, str, str]] = []
+    """Build Markdown flashcards from memorization-related sections."""
+    source_id = str(source.get("id", ""))
+    title = str(source.get("title", source_id))
+    cards = build_flashcards_from_sections(source_id, title, sections)
+    return flashcards_to_markdown(cards, course_name, source_id, title)
 
-    for bullet in _bullet_lines(sections.get("must_memorize", "")):
-        cards.append(
-            (
-                "Memorize",
-                f"What should I memorize about {bullet[:60]}?",
-                bullet,
-            )
-        )
-    for bullet in _bullet_lines(sections.get("must_understand", "")):
-        cards.append(
-            (
-                "Understand",
-                f"What should I understand about {bullet[:60]}?",
-                bullet,
-            )
-        )
-    for bullet in _bullet_lines(sections.get("formula_sheet", "")):
-        cards.append(
-            (
-                "Formula",
-                f"What is the formula or method for {bullet[:60]}?",
-                bullet,
-            )
-        )
-    for bullet in _bullet_lines(sections.get("exam_traps", "")):
-        cards.append(
-            (
-                "Trap",
-                "What is a common exam or homework trap?",
-                bullet,
-            )
-        )
 
-    lines = [
-        "# Flashcards",
-        "",
-        "Course:",
-        course_name,
-        "",
-        "Source:",
-        f"{source_id} - {title}",
-        "",
-        "Instructions:",
-        "Cover the front, answer aloud, then check the back.",
-        "",
-    ]
-
-    if cards:
-        for index, (category, front, back) in enumerate(cards, start=1):
-            lines.extend(
-                [
-                    f"## Card {index}",
-                    "",
-                    "Category:",
-                    category,
-                    "",
-                    "Front:",
-                    front,
-                    "",
-                    "Back:",
-                    back,
-                    "",
-                ]
-            )
-    else:
-        lines.append("_(No bullet cards parsed; raw section content below.)_\n")
-        for heading_key, label in (
-            ("must_memorize", "Must-Memorize List"),
-            ("must_understand", "Must-Understand List"),
-            ("formula_sheet", "Formula / Method Sheet"),
-            ("exam_traps", "Exam / Homework Traps"),
-        ):
-            body = sections.get(heading_key, _MISSING_SECTION)
-            if body != _MISSING_SECTION:
-                lines.extend([f"## {label}", "", body, ""])
-
-    return "\n".join(lines) + "\n"
+def write_flashcard_exports(
+    course_name: str,
+    source: dict,
+    sections: dict,
+    course_path: Path,
+) -> tuple[dict[str, str], int]:
+    """Write Markdown, CSV, and Anki TSV flashcard files; return paths and count."""
+    source_id = str(source.get("id", ""))
+    title = str(source.get("title", source_id))
+    cards = build_flashcards_from_sections(source_id, title, sections)
+    paths = get_flashcard_output_paths(course_path, source_id)
+    paths["markdown"].parent.mkdir(parents=True, exist_ok=True)
+    paths["markdown"].write_text(
+        flashcards_to_markdown(cards, course_name, source_id, title),
+        encoding="utf-8",
+    )
+    paths["csv"].write_text(flashcards_to_csv(cards), encoding="utf-8")
+    paths["anki_tsv"].write_text(flashcards_to_anki_tsv(cards), encoding="utf-8")
+    written = {
+        "flashcards": str(paths["markdown"].resolve()),
+        "flashcards_csv": str(paths["csv"].resolve()),
+        "flashcards_anki_tsv": str(paths["anki_tsv"].resolve()),
+    }
+    return written, len(cards)
 
 
 def build_practice_quiz(course_name: str, source: dict, sections: dict) -> str:
@@ -697,9 +639,12 @@ def build_weak_points_seed(course_name: str, source: dict, sections: dict) -> st
 def _study_output_paths(course_path: Path, source_id: str) -> dict[str, Path]:
     normalized = _normalize_source_id(source_id)
     base = course_path / STUDY_OUTPUTS_BASE
+    flashcard_paths = get_flashcard_output_paths(course_path, normalized)
     return {
         "study_guides": base / "study_guides" / f"{normalized}_final_study_guide.md",
-        "flashcards": base / "flashcards" / f"{normalized}_flashcards.md",
+        "flashcards": flashcard_paths["markdown"],
+        "flashcards_csv": flashcard_paths["csv"],
+        "flashcards_anki_tsv": flashcard_paths["anki_tsv"],
         "formula_sheets": base / "formula_sheets" / f"{normalized}_formula_sheet.md",
         "quizzes": base / "quizzes" / f"{normalized}_practice_quiz.md",
         "active_recall": base / "active_recall" / f"{normalized}_active_recall.md",
@@ -741,9 +686,21 @@ def generate_study_pack(
     sections = extract_sections(final_audit["text"])
 
     paths = _study_output_paths(course_path, normalized_id)
-    output_files = {key: path for key, path in paths.items() if key != "manifest"}
+    output_files = {
+        key: path
+        for key, path in paths.items()
+        if key not in {"manifest", "flashcards", "flashcards_csv", "flashcards_anki_tsv"}
+    }
 
     existing = [str(path.resolve()) for path in output_files.values() if path.is_file()]
+    flashcard_paths = [
+        paths["flashcards"],
+        paths["flashcards_csv"],
+        paths["flashcards_anki_tsv"],
+    ]
+    existing.extend(
+        str(path.resolve()) for path in flashcard_paths if path.is_file()
+    )
     if existing and not overwrite:
         raise StudyPackOutputExistsError(
             "Study pack output already exists:\n"
@@ -774,7 +731,6 @@ def generate_study_pack(
         "study_guides": lambda: build_final_study_guide(
             course_path.name, entry, sections, audit_id
         ),
-        "flashcards": lambda: build_flashcards(course_path.name, entry, sections),
         "formula_sheets": lambda: build_formula_sheet(course_path.name, entry, sections),
         "quizzes": lambda: build_practice_quiz(course_path.name, entry, sections),
         "active_recall": lambda: build_active_recall(course_path.name, entry, sections),
@@ -787,6 +743,15 @@ def generate_study_pack(
         path.write_text(content, encoding="utf-8")
         written[key] = str(path.resolve())
 
+    flashcard_written, flashcard_count = write_flashcard_exports(
+        course_path.name, entry, sections, course_path
+    )
+    written.update(flashcard_written)
+
+    for warning in flashcard_quality_warnings(flashcard_count):
+        if warning not in warnings:
+            warnings.append(warning)
+
     generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     manifest = {
         "course": course_path.name,
@@ -797,11 +762,14 @@ def generate_study_pack(
         "outputs": {
             "final_study_guide": written["study_guides"],
             "flashcards": written["flashcards"],
+            "flashcards_csv": written["flashcards_csv"],
+            "flashcards_anki_tsv": written["flashcards_anki_tsv"],
             "formula_sheet": written["formula_sheets"],
             "practice_quiz": written["quizzes"],
             "active_recall": written["active_recall"],
             "weak_points_seed": written["weak_points"],
         },
+        "flashcard_count": flashcard_count,
         "warnings": warnings,
         "quality": quality,
     }
@@ -819,6 +787,8 @@ def generate_study_pack(
             "study_pack_manifest_path": str(paths["manifest"].resolve()),
             "final_study_guide_path": written["study_guides"],
             "flashcards_path": written["flashcards"],
+            "flashcards_csv_path": written["flashcards_csv"],
+            "flashcards_anki_tsv_path": written["flashcards_anki_tsv"],
             "formula_sheet_path": written["formula_sheets"],
             "practice_quiz_path": written["quizzes"],
             "active_recall_path": written["active_recall"],
@@ -836,6 +806,7 @@ def generate_study_pack(
         "manifest_path": str(paths["manifest"].resolve()),
         "outputs": manifest["outputs"],
         "warnings": warnings,
+        "flashcard_count": flashcard_count,
         "quality": quality,
         "quality_status": quality["quality_status"],
         "status": "study_pack_generated",

@@ -195,6 +195,9 @@ class TestStudyPack(unittest.TestCase):
         outputs = summary["outputs"]
         for path_str in outputs.values():
             self.assertTrue(Path(path_str).is_file(), path_str)
+        self.assertIn("flashcards_csv", outputs)
+        self.assertIn("flashcards_anki_tsv", outputs)
+        self.assertGreater(summary.get("flashcard_count", 0), 0)
         manifest = Path(summary["manifest_path"])
         self.assertTrue(manifest.is_file())
         data = json.loads(manifest.read_text(encoding="utf-8"))

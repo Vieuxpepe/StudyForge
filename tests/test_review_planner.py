@@ -256,7 +256,7 @@ class TestReviewPlanner(unittest.TestCase):
 
     def test_build_markdown_empty(self) -> None:
         text = build_review_plan_markdown(
-            "ECA1010_Test", [], [], [], [], "2026-06-01"
+            "ECA1010_Test", [], [], [], [], [], "2026-06-01"
         )
         self.assertIn("No priority items", text)
 

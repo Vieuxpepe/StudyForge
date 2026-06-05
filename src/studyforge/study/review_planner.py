@@ -11,6 +11,7 @@ from pathlib import Path
 
 from studyforge.core.sources import resolve_course_path
 from studyforge.study.active_recall import load_active_recall_log
+from studyforge.study.flashcard_review import collect_due_flashcards
 from studyforge.study.mistakes import list_mistakes
 from studyforge.study.weak_points import list_weak_points
 
@@ -161,6 +162,21 @@ def _recall_priority_tier(entry: dict) -> int:
     return 9
 
 
+def _flashcard_priority_tier(entry: dict) -> int:
+    grade = str(entry.get("latest_grade", entry.get("grade", ""))).lower()
+    if grade == "forgot":
+        return 1
+    if grade == "hard":
+        return 4
+    if grade == "skipped":
+        return 5
+    if grade == "good":
+        return 6
+    if grade == "easy":
+        return 7
+    return 9
+
+
 def _priority_reason_for_item(item: dict) -> str:
     item_type = item["type"]
     if item_type == "active_recall":
@@ -170,6 +186,17 @@ def _priority_reason_for_item(item: dict) -> str:
         if grade == "partial":
             return "Partial active recall attempt — redo without notes."
         return "Skipped active recall question — try again."
+    if item_type == "flashcard":
+        grade = str(item.get("latest_grade", item.get("grade", ""))).lower()
+        due = str(item.get("due_date", "")).strip()
+        due_note = f" (due {due})" if due else ""
+        if grade == "forgot":
+            return f"Forgotten flashcard due for review{due_note}."
+        if grade == "hard":
+            return f"Hard flashcard due for review{due_note}."
+        if grade == "skipped":
+            return f"Skipped flashcard due for review{due_note}."
+        return f"Flashcard due for review{due_note}."
     if item_type == "mistake":
         status = str(item.get("status", "")).lower()
         if status in {"new", "still_weak"}:
@@ -222,10 +249,30 @@ def _recall_to_priority_item(entry: dict) -> dict:
     }
 
 
+def _flashcard_to_priority_item(entry: dict) -> dict:
+    grade = str(entry.get("latest_grade", entry.get("grade", "")))
+    return {
+        "type": "flashcard",
+        "id": entry.get("card_id", ""),
+        "source_id": entry.get("source_id", ""),
+        "title": (entry.get("front", "") or "")[:120],
+        "priority_reason": "",
+        "details": entry.get("notes", ""),
+        "grade": grade,
+        "latest_grade": grade,
+        "due_date": entry.get("due_date", ""),
+        "card_id": entry.get("card_id", ""),
+        "front": entry.get("front", ""),
+        "back": entry.get("back", ""),
+        "_tier": _flashcard_priority_tier(entry),
+    }
+
+
 def prioritize_review_items(
     mistakes: list[dict],
     weak_points: list[dict],
     recall_items: list[dict],
+    flashcard_items: list[dict] | None = None,
     limit: int = 10,
 ) -> list[dict]:
     """Return top priority review items using simple deterministic rules."""
@@ -236,6 +283,8 @@ def prioritize_review_items(
         candidates.append(_weak_point_to_priority_item(entry))
     for entry in recall_items:
         candidates.append(_recall_to_priority_item(entry))
+    for entry in flashcard_items or []:
+        candidates.append(_flashcard_to_priority_item(entry))
 
     candidates.sort(key=lambda item: (item["_tier"], item.get("id", "")))
 
@@ -252,6 +301,7 @@ def build_review_plan_markdown(
     mistakes: list[dict],
     weak_points: list[dict],
     recall_items: list[dict],
+    flashcard_items: list[dict],
     priority_items: list[dict],
     date_str: str,
 ) -> str:
@@ -341,11 +391,31 @@ def build_review_plan_markdown(
         lines.append("No active recall questions need redo.")
         lines.append("")
 
+    lines.extend(["## Flashcards Due", ""])
+    if flashcard_items:
+        for entry in flashcard_items:
+            lines.extend(
+                [
+                    f"### {entry.get('card_id', 'card')}",
+                    "",
+                    f"- **Source:** {entry.get('source_id', '')}",
+                    f"- **Front:** {entry.get('front', '')}",
+                    f"- **Latest grade:** {entry.get('latest_grade', entry.get('grade', ''))}",
+                    f"- **Due date:** {entry.get('due_date', '')}",
+                    f"- **Notes:** {entry.get('notes', '') or '(none)'}",
+                    "",
+                ]
+            )
+    else:
+        lines.append("No flashcards due for review.")
+        lines.append("")
+
     lines.extend(
         [
             "## Suggested Review Tasks",
             "",
             "- Redo all wrong active recall questions.",
+            "- Review flashcards due today.",
             "- Review each weak point with confidence 1–2.",
             "- Re-answer at least 5 active recall questions without notes.",
             "- Mark mastered only after explaining the concept without looking.",
@@ -354,6 +424,7 @@ def build_review_plan_markdown(
             "",
             "- [ ] I reviewed each top-priority mistake.",
             "- [ ] I redid wrong/partial active recall questions.",
+            "- [ ] I reviewed due flashcards.",
             "- [ ] I updated mistake statuses.",
             "- [ ] I updated weak-point confidence.",
             "- [ ] I wrote down any new confusion.",
@@ -371,6 +442,7 @@ def has_reviewable_items(
         collect_open_mistakes(course_name, root)
         or collect_open_weak_points(course_name, root)
         or collect_active_recall_needs_review(course_name, root)
+        or collect_due_flashcards(course_name, root)
     )
 
 
@@ -412,8 +484,9 @@ def generate_review_plan(
     mistakes = collect_open_mistakes(course_name, root)
     weak_points = collect_open_weak_points(course_name, root)
     recall_items = collect_active_recall_needs_review(course_name, root)
+    flashcard_items = collect_due_flashcards(course_name, root)
     priority_items = prioritize_review_items(
-        mistakes, weak_points, recall_items, limit=limit
+        mistakes, weak_points, recall_items, flashcard_items, limit=limit
     )
 
     markdown = build_review_plan_markdown(
@@ -421,6 +494,7 @@ def generate_review_plan(
         mistakes,
         weak_points,
         recall_items,
+        flashcard_items,
         priority_items,
         day,
     )
@@ -436,6 +510,7 @@ def generate_review_plan(
         "mistake_count": len(mistakes),
         "weak_point_count": len(weak_points),
         "active_recall_review_count": len(recall_items),
+        "flashcards_due_count": len(flashcard_items),
         "priority_count": len(priority_items),
         "markdown_path": str(md_path.resolve()),
         "json_path": str(json_path.resolve()),

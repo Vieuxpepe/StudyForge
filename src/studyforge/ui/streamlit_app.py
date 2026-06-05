@@ -4,6 +4,7 @@ StudyForge Streamlit GUI — wraps existing CLI backend functions.
 
 from __future__ import annotations
 
+import csv
 import json
 import tempfile
 from pathlib import Path
@@ -37,6 +38,12 @@ from studyforge.core.guided_workflow import (
 from studyforge.core.pipeline_status import STEP_ORDER, get_pipeline_status
 from studyforge.core.paths import find_project_root, get_courses_dir, load_config
 from studyforge.core.secrets import get_google_api_key, set_google_api_key
+from studyforge.core.backup import (
+    BackupExistsError,
+    create_course_backup,
+    format_bytes,
+    list_course_backups,
+)
 from studyforge.core.sources import add_source, list_sources, resolve_course_path
 from studyforge.llm.google_genai_client import (
     DEFAULT_GEMMA_4_26B_MODEL,
@@ -67,12 +74,29 @@ from studyforge.study.mistakes import (
     list_mistakes,
     update_mistake_status,
 )
+from studyforge.study.flashcards import (
+    FlashcardExportExistsError,
+    export_flashcards_from_sections,
+)
+from studyforge.study.flashcard_review import (
+    FlashcardsNotReadyError,
+    InvalidFlashcardGradeError,
+    collect_due_flashcards,
+    get_first_unreviewed_card,
+    get_flashcard_review_log_path,
+    load_flashcards_for_source,
+    load_flashcard_review_log,
+    record_flashcard_review,
+    summarize_flashcard_reviews,
+)
 from studyforge.study.study_pack import (
     FinalAuditNotFoundError,
     StudyPackOutputExistsError,
     _SECTION_HEADINGS,
     diagnose_study_pack,
+    extract_sections,
     generate_study_pack,
+    get_latest_final_audit,
 )
 from studyforge.study.review_planner import (
     ReviewPlanExistsError,
@@ -88,6 +112,7 @@ from studyforge.study.study_session import (
     record_session_item_result,
     start_study_session,
 )
+from studyforge.study.today_dashboard import export_today_dashboard, get_today_dashboard
 from studyforge.study.weak_points import (
     InvalidConfidenceError,
     InvalidWeakPointStatusError,
@@ -100,12 +125,14 @@ from studyforge.study.weak_points import (
 from studyforge.ui.helpers import read_text_preview, source_pipeline_flags, yes_no
 
 NAV_PAGES = [
+    "Today",
     "Dashboard",
     "Courses",
     "Sources",
     "Pipeline",
     "Audits",
     "Active Recall",
+    "Flashcards",
     "Review Tracker",
     "Study Session",
     "Settings",
@@ -418,6 +445,88 @@ def _render_study_pack_quality(quality: dict | None, extra_warnings: list | None
             st.write(f"- {warning}")
 
 
+def _render_flashcards_section(course_name: str, source_id: str, entry: dict) -> None:
+    """Flashcard exports, regenerate control, and preview."""
+    st.subheader("Flashcards")
+    st.caption(
+        "Deterministic flashcards from final audit sections. Exports Markdown, CSV, "
+        "and Anki TSV (import manually into Anki). No spaced repetition scheduling yet."
+    )
+
+    manifest_path = entry.get("study_pack_manifest_path")
+    manifest_data: dict | None = None
+    if manifest_path and Path(manifest_path).is_file():
+        try:
+            manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest_data = None
+
+    flashcard_count = None
+    if manifest_data is not None:
+        flashcard_count = manifest_data.get("flashcard_count")
+    if flashcard_count is not None:
+        st.write(f"**Card count:** {flashcard_count}")
+
+    path_rows = [
+        ("Markdown", entry.get("flashcards_path") or (manifest_data or {}).get("outputs", {}).get("flashcards")),
+        ("CSV", entry.get("flashcards_csv_path") or (manifest_data or {}).get("outputs", {}).get("flashcards_csv")),
+        (
+            "Anki TSV",
+            entry.get("flashcards_anki_tsv_path")
+            or (manifest_data or {}).get("outputs", {}).get("flashcards_anki_tsv"),
+        ),
+    ]
+    existing_paths = [(label, p) for label, p in path_rows if p and Path(p).is_file()]
+    if existing_paths:
+        st.write("**Export files**")
+        for label, path_str in existing_paths:
+            st.write(f"- **{label}:** `{path_str}`")
+
+    fc_overwrite = st.checkbox(
+        "Overwrite existing flashcard exports",
+        value=False,
+        key=f"flashcards_overwrite_{source_id}",
+    )
+    if st.button("Regenerate flashcards", key=f"regen_flashcards_{source_id}"):
+        try:
+            course_path = resolve_course_path(course_name)
+            final_audit = get_latest_final_audit(course_path, source_id)
+            sections = extract_sections(final_audit["text"])
+            summary = export_flashcards_from_sections(
+                course_name,
+                source_id,
+                sections,
+                overwrite=fc_overwrite,
+            )
+            st.success(
+                f"Regenerated {summary['flashcard_count']} flashcards "
+                f"(Markdown, CSV, Anki TSV)."
+            )
+            for warning in summary.get("warnings", []):
+                st.warning(warning)
+            st.rerun()
+        except FlashcardExportExistsError as exc:
+            st.error(str(exc))
+        except FinalAuditNotFoundError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    csv_path = next((Path(p) for label, p in existing_paths if label == "CSV"), None)
+    if csv_path and csv_path.is_file():
+        try:
+            with csv_path.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            if rows:
+                st.write("**Preview (first 10 cards)**")
+                for index, row in enumerate(rows[:10], start=1):
+                    st.markdown(f"**Card {index}** — {row.get('section', '')}")
+                    st.write(f"Front: {row.get('front', '')}")
+                    st.write(f"Back: {row.get('back', '')}")
+        except OSError:
+            pass
+
+
 def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict | None) -> None:
     """Generate and preview study pack outputs from the latest final audit."""
     st.subheader("Study Pack")
@@ -491,7 +600,9 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
     output_paths = [
         ("Manifest", entry.get("study_pack_manifest_path")),
         ("Final study guide", entry.get("final_study_guide_path")),
-        ("Flashcards", entry.get("flashcards_path")),
+        ("Flashcards (Markdown)", entry.get("flashcards_path")),
+        ("Flashcards (CSV)", entry.get("flashcards_csv_path")),
+        ("Flashcards (Anki TSV)", entry.get("flashcards_anki_tsv_path")),
         ("Formula sheet", entry.get("formula_sheet_path")),
         ("Practice quiz", entry.get("practice_quiz_path")),
         ("Active recall", entry.get("active_recall_path")),
@@ -537,6 +648,8 @@ def _render_study_pack(course_name: str, source_id: str, pipeline_status: dict |
                 key=f"study_pack_preview_text_{source_id}",
             )
 
+    _render_flashcards_section(course_name, source_id, entry)
+
 
 def _show_result_summary(title: str, data: dict) -> None:
     st.success(title)
@@ -547,6 +660,104 @@ def _show_result_summary(title: str, data: dict) -> None:
                 st.write(f"- {item}")
         else:
             st.write(f"**{key}:** {value}")
+
+
+def page_today(course_name: str | None) -> None:
+    st.header("Today")
+    if not _require_course():
+        return
+
+    st.caption(
+        "What to study now — due flashcards, active recall gaps, mistakes, and "
+        "weak points. Deterministic (no AI). Pipeline Doctor on **Pipeline** is "
+        "for source processing; **Today** is for studying."
+    )
+
+    try:
+        dashboard = get_today_dashboard(course_name)
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    summary = dashboard.get("summary", {})
+    st.subheader(f"{dashboard.get('course', '')} — {dashboard.get('date', '')}")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Due flashcards", summary.get("due_flashcards", 0))
+    c2.metric("Active recall", summary.get("active_recall_needs_review", 0))
+    c3.metric("Open mistakes", summary.get("open_mistakes", 0))
+    c4.metric("Open weak points", summary.get("open_weak_points", 0))
+
+    actions = dashboard.get("recommended_actions") or []
+    if actions:
+        primary = actions[0]
+        st.info(f"**Recommended:** {primary.get('label', '')} — {primary.get('reason', '')}")
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+    with col_a:
+        if st.button("Generate review plan", key="today_gen_plan"):
+            try:
+                from studyforge.study.review_planner import ReviewPlanExistsError, generate_review_plan
+
+                generate_review_plan(course_name, overwrite=False)
+                st.success("Review plan generated.")
+                st.rerun()
+            except ReviewPlanExistsError:
+                st.warning("Today's plan already exists. Use Review Tracker to overwrite.")
+            except Exception as exc:
+                _show_exception(exc)
+    with col_b:
+        if st.button("Start study session", key="today_start_session"):
+            try:
+                result = start_study_session(course_name, limit=10)
+                st.success(f"Started `{result['session_id']}` with {result['item_count']} items.")
+                st.rerun()
+            except Exception as exc:
+                _show_exception(exc)
+    with col_c:
+        session_id = summary.get("latest_session_id")
+        if summary.get("latest_session_status") == "in_progress" and session_id:
+            if st.button("Continue session", key="today_continue_session"):
+                st.session_state[f"study_session_{course_name}"] = get_latest_study_session(
+                    course_name
+                )
+                st.success("Session loaded. Open **Study Session** in the sidebar.")
+        else:
+            st.button("Continue session", key="today_continue_disabled", disabled=True)
+    with col_d:
+        if st.button("Export dashboard", key="today_export"):
+            try:
+                path = export_today_dashboard(course_name)
+                st.success(f"Exported: `{path}`")
+            except Exception as exc:
+                _show_exception(exc)
+
+    if summary.get("latest_session_status") == "in_progress" and session_id:
+        st.caption(f"In-progress session: `{session_id}` — use **Study Session** to continue.")
+
+    priority_items = dashboard.get("priority_items") or []
+    st.subheader("Priority items")
+    if priority_items:
+        rows = []
+        for item in priority_items:
+            rows.append(
+                {
+                    "Type": item.get("type", ""),
+                    "ID": item.get("id", ""),
+                    "Source": item.get("source_id", ""),
+                    "Title": (item.get("title", "") or "")[:80],
+                    "Reason": item.get("priority_reason", ""),
+                }
+            )
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.write("No priority items for today.")
+
+    warnings = dashboard.get("warnings") or []
+    if warnings:
+        st.subheader("Warnings")
+        for warning in warnings:
+            st.warning(warning)
 
 
 def page_dashboard(course_name: str | None) -> None:
@@ -614,6 +825,83 @@ def page_courses() -> None:
                 st.session_state.selected_course = folder
                 st.success(f"Course created: {folder}")
                 st.code(str(path))
+            except Exception as exc:
+                _show_exception(exc)
+
+    st.subheader("Course backup")
+    st.warning(
+        "Backups may contain private course PDFs, extracted text, audits, and study logs. "
+        "Store them safely."
+    )
+    course_name = st.session_state.selected_course
+    if not course_name:
+        st.info("Select a course in the sidebar to create or list backups.")
+    else:
+        st.write(f"**Selected course:** `{course_name}`")
+        include_sources = st.checkbox(
+            "Include source PDFs/materials",
+            value=True,
+            key="backup_include_sources",
+        )
+        output_dir_text = st.text_input(
+            "Optional output directory (leave empty for course backups folder)",
+            value="",
+            key="backup_output_dir",
+        )
+        col_create, col_list = st.columns(2)
+        with col_create:
+            if st.button("Create backup", key="backup_create_btn"):
+                try:
+                    output_dir = (
+                        Path(output_dir_text.strip())
+                        if output_dir_text.strip()
+                        else None
+                    )
+                    summary = create_course_backup(
+                        course_name,
+                        include_sources=include_sources,
+                        output_dir=output_dir,
+                    )
+                    st.success("Backup created.")
+                    st.write(f"**Files:** {summary.get('file_count', 0)}")
+                    st.write(
+                        f"**Size:** {format_bytes(int(summary.get('total_bytes', 0)))}"
+                    )
+                    st.code(summary.get("backup_path", ""))
+                    for warning in summary.get("warnings") or []:
+                        st.warning(warning)
+                except BackupExistsError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    _show_exception(exc)
+        with col_list:
+            if st.button("List backups", key="backup_list_btn"):
+                st.session_state.show_backup_list = True
+
+        if st.session_state.get("show_backup_list"):
+            try:
+                output_dir = (
+                    Path(output_dir_text.strip()) if output_dir_text.strip() else None
+                )
+                backups = list_course_backups(
+                    course_name,
+                    backup_dir=output_dir,
+                )
+                if backups:
+                    st.dataframe(
+                        [
+                            {
+                                "file_name": entry["file_name"],
+                                "size": format_bytes(int(entry["size_bytes"])),
+                                "modified": entry["modified"],
+                                "path": entry["path"],
+                            }
+                            for entry in backups
+                        ],
+                        use_container_width=True,
+                    )
+                else:
+                    st.write("No backups found.")
             except Exception as exc:
                 _show_exception(exc)
 
@@ -1214,6 +1502,149 @@ def page_active_recall(course_name: str | None) -> None:
             _show_exception(exc)
 
 
+def page_flashcards(course_name: str | None) -> None:
+    st.header("Flashcards")
+    if not _require_course():
+        return
+
+    st.caption(
+        "Review generated flashcards and self-grade (no AI). "
+        "Lightweight due scheduling assigns simple review intervals by grade — "
+        "not full Anki/SM-2. Due cards appear in review plans and study sessions."
+    )
+
+    sources = _source_options(course_name)
+    source_id = _select_source(sources, key="fc_source")
+    if not source_id:
+        return
+
+    try:
+        cards = load_flashcards_for_source(course_name, source_id)
+        summary = summarize_flashcard_reviews(course_name, source_id)
+    except FlashcardsNotReadyError as exc:
+        st.warning(str(exc))
+        st.info("Generate a study pack on the **Pipeline** page first.")
+        return
+    except Exception as exc:
+        _show_exception(exc)
+        return
+
+    if not cards:
+        st.warning("No flashcards found in the CSV export.")
+        return
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1.metric("Cards", len(cards))
+    c2.metric("Reviews", summary["review_count"])
+    c3.metric("Due", summary.get("due_count", 0))
+    c4.metric("Easy", summary["easy"])
+    c5.metric("Good", summary["good"])
+    c6.metric("Hard", summary["hard"])
+    c7.metric("Forgot", summary["forgot"])
+    c8.metric("Needs review", summary["needs_review_count"])
+
+    due_cards = collect_due_flashcards(course_name, source_id=source_id)
+    if due_cards:
+        st.subheader("Cards due for review")
+        for card in due_cards[:10]:
+            st.write(
+                f"- `{card['card_id']}` · **{card.get('latest_grade', card.get('grade', ''))}** "
+                f"· due **{card.get('due_date', '')}** · {card.get('front', '')[:80]}"
+            )
+        if len(due_cards) > 10:
+            st.caption(f"… and {len(due_cards) - 10} more due cards.")
+
+    labels = [f"{card['card_id']} — {card['front'][:70]}" for card in cards]
+    id_by_label = {labels[i]: cards[i] for i in range(len(cards))}
+
+    col_sel, col_next = st.columns([3, 1])
+    with col_sel:
+        chosen_label = st.selectbox("Card", labels, key=f"fc_select_{source_id}")
+    with col_next:
+        st.write("")
+        if st.button("Next unreviewed", key=f"fc_next_{source_id}"):
+            course_path = resolve_course_path(course_name)
+            log = load_flashcard_review_log(
+                get_flashcard_review_log_path(course_path, source_id),
+                source_id,
+            )
+            next_card = get_first_unreviewed_card(cards, log)
+            if next_card:
+                st.session_state[f"fc_select_{source_id}"] = (
+                    f"{next_card['card_id']} — {next_card['front'][:70]}"
+                )
+                st.session_state[
+                    f"fc_revealed_{source_id}_{next_card['card_id']}"
+                ] = False
+                st.rerun()
+            st.info("Every card has at least one review recorded.")
+
+    current = id_by_label[chosen_label]
+    card_id = current["card_id"]
+    reveal_key = f"fc_revealed_{source_id}_{card_id}"
+    if reveal_key not in st.session_state:
+        st.session_state[reveal_key] = False
+
+    st.subheader("Front")
+    st.write(current["front"])
+    st.caption(f"ID: `{card_id}` · Section: {current.get('section', '')}")
+
+    if not st.session_state[reveal_key]:
+        if st.button("Reveal answer", key=f"fc_reveal_{source_id}_{card_id}"):
+            st.session_state[reveal_key] = True
+            st.rerun()
+    else:
+        st.subheader("Back")
+        st.write(current["back"])
+
+    grade = st.selectbox(
+        "Grade",
+        ["easy", "good", "hard", "forgot", "skipped"],
+        key=f"fc_grade_{source_id}_{card_id}",
+    )
+    notes = st.text_input("Notes", key=f"fc_notes_{source_id}_{card_id}")
+    create_weak = st.checkbox(
+        "Create weak point if hard/forgot",
+        key=f"fc_weak_{source_id}_{card_id}",
+    )
+    weak_concept = st.text_input(
+        "Weak point concept (optional)",
+        key=f"fc_wc_{source_id}_{card_id}",
+    )
+
+    if st.button("Save review", key=f"fc_save_{source_id}_{card_id}"):
+        try:
+            result = record_flashcard_review(
+                course_name,
+                source_id,
+                card_id,
+                current["front"],
+                current["back"],
+                grade,
+                notes=notes or None,
+                create_weak_point=create_weak,
+                weak_point_concept=weak_concept or None,
+            )
+            st.success(f"Saved {result['review_id']} — grade: {result['grade']}")
+            st.session_state[reveal_key] = False
+            st.rerun()
+        except InvalidFlashcardGradeError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            _show_exception(exc)
+
+    recent = summary.get("recent_reviews") or []
+    if recent:
+        st.subheader("Recent reviews")
+        for review in recent:
+            due = review.get("due_date", "")
+            due_text = f" · due {due}" if due else ""
+            st.write(
+                f"- `{review.get('review_id')}` · {review.get('card_id')} · "
+                f"**{review.get('grade')}**{due_text} · {review.get('front', '')[:60]}"
+            )
+
+
 def _weak_active_recall_attempts(course_name: str, source_id: str) -> list[dict]:
     """Return wrong, partial, or skipped attempts (most recent first)."""
     course_path = resolve_course_path(course_name)
@@ -1260,6 +1691,8 @@ def page_review_tracker(course_name: str | None) -> None:
             st.write(f"**Mistakes:** {summary['mistake_count']}")
             st.write(f"**Weak points:** {summary['weak_point_count']}")
             st.write(f"**Active recall redo:** {summary['active_recall_review_count']}")
+        if summary.get("flashcards_due_count") is not None:
+            st.write(f"**Flashcards due:** {summary['flashcards_due_count']}")
             st.write(f"**Top priorities:** {summary['priority_count']}")
             st.code(summary["markdown_path"])
             st.rerun()
@@ -1484,8 +1917,8 @@ def page_study_session(course_name: str | None) -> None:
         return
 
     st.caption(
-        "Work through today's review priorities in one place: active recall, "
-        "mistakes, and weak points. Self-graded only (no AI)."
+        "Work through today's review priorities and unanswered active recall questions "
+        "in one place: recall gaps, mistakes, and weak points. Self-graded only (no AI)."
     )
 
     session_key = f"study_session_{course_name}"
@@ -1508,7 +1941,11 @@ def page_study_session(course_name: str | None) -> None:
             st.session_state[session_key] = session
 
     if not session:
-        st.info("No study session yet. Click **Start new session** when you have open mistakes, weak points, or recall gaps.")
+        st.info(
+            "No study session yet. Click **Start new session** when you have open "
+            "mistakes, weak points, recall gaps, or unanswered active recall questions "
+            "from a study pack."
+        )
         return
 
     session_id = session.get("session_id", "")
@@ -1524,7 +1961,10 @@ def page_study_session(course_name: str | None) -> None:
     )
 
     if not items:
-        st.warning("This session has no priority items. Add mistakes, weak points, or practice active recall first.")
+        st.warning(
+            "This session has no items. Add mistakes or weak points, practice active "
+            "recall, or generate a study pack with active recall questions."
+        )
         col_f, col_e = st.columns(2)
         with col_f:
             if st.button("Finish session", key=f"ss_finish_empty_{course_name}"):
@@ -1555,8 +1995,11 @@ def page_study_session(course_name: str | None) -> None:
     item_type = current.get("type", "")
     result_options: list[str]
 
-    if item_type == "active_recall":
-        st.subheader("Active recall")
+    if item_type in ("active_recall", "active_recall_unanswered"):
+        if item_type == "active_recall_unanswered":
+            st.subheader("Unanswered active recall question")
+        else:
+            st.subheader("Active recall")
         st.write(payload.get("question", current.get("title", "")))
         st.caption(f"Question ID: `{payload.get('question_id', '')}`")
         if payload.get("grade"):
@@ -1583,6 +2026,54 @@ def page_study_session(course_name: str | None) -> None:
                 notes=notes or None,
                 user_answer=user_answer,
                 create_mistake=create_mistake,
+                create_weak_point=create_weak,
+                weak_point_concept=weak_concept or None,
+            )
+
+    elif item_type in ("flashcard", "flashcard_unreviewed"):
+        if item_type == "flashcard_unreviewed":
+            st.subheader("Unreviewed flashcard")
+        else:
+            st.subheader("Flashcard review")
+        ss_reveal_key = f"ss_fc_revealed_{session_id}_{current['session_item_id']}"
+        if ss_reveal_key not in st.session_state:
+            st.session_state[ss_reveal_key] = False
+        st.write("**Front:**", payload.get("front", current.get("title", "")))
+        st.caption(f"Card ID: `{payload.get('card_id', '')}`")
+        if payload.get("due_date"):
+            st.caption(f"Due: {payload.get('due_date')}")
+        if payload.get("grade"):
+            st.caption(f"Last grade: {payload.get('grade')}")
+        if not st.session_state[ss_reveal_key]:
+            if st.button("Reveal answer", key=f"ss_fc_rev_{current['session_item_id']}"):
+                st.session_state[ss_reveal_key] = True
+                st.rerun()
+        else:
+            st.write("**Back:**", payload.get("back", ""))
+        grade = st.selectbox(
+            "Grade",
+            ["easy", "good", "hard", "forgot", "skipped"],
+            key=f"ss_fc_grade_{session_id}_{current['session_item_id']}",
+        )
+        notes = st.text_input(
+            "Notes", key=f"ss_fc_notes_{session_id}_{current['session_item_id']}"
+        )
+        create_weak = st.checkbox(
+            "Create weak point if hard/forgot",
+            key=f"ss_fc_weak_{current['session_item_id']}",
+        )
+        weak_concept = st.text_input(
+            "Weak point concept (optional)",
+            key=f"ss_fc_wc_{current['session_item_id']}",
+        )
+
+        def _save_recall() -> None:
+            record_session_item_result(
+                course_name,
+                session_id,
+                current["session_item_id"],
+                grade,
+                notes=notes or None,
                 create_weak_point=create_weak,
                 weak_point_concept=weak_concept or None,
             )
@@ -1747,7 +2238,9 @@ def run() -> None:
     _init_session_state()
     page, course_name = _render_sidebar()
 
-    if page == "Dashboard":
+    if page == "Today":
+        page_today(course_name)
+    elif page == "Dashboard":
         page_dashboard(course_name)
     elif page == "Courses":
         page_courses()
@@ -1759,6 +2252,8 @@ def run() -> None:
         page_audits(course_name)
     elif page == "Active Recall":
         page_active_recall(course_name)
+    elif page == "Flashcards":
+        page_flashcards(course_name)
     elif page == "Review Tracker":
         page_review_tracker(course_name)
     elif page == "Study Session":
